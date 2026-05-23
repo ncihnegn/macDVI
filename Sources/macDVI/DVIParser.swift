@@ -10,6 +10,8 @@ final class DVIParser {
     private var preamble: DVIPreamble?
     private var fonts: [Int: DVIFontDefinition] = [:]
     private var warnings: [String] = []
+    private var warnedMissingMetricFonts: Set<Int> = []
+    private var warnedChecksumFonts: Set<Int> = []
 
     init(url: URL) throws {
         self.url = url
@@ -226,7 +228,11 @@ final class DVIParser {
             return
         }
 
-        let advanceDVI = widthDVIUnits(characterCode: characterCode, fontNumber: fontNumber, pointsPerDVIUnit: pointsPerDVIUnit)
+        let metric = characterMetricDVIUnits(
+            characterCode: characterCode,
+            fontNumber: fontNumber,
+            pointsPerDVIUnit: pointsPerDVIUnit
+        )
         if page != nil {
             let fontSize = fontSizePoints(fontNumber: fontNumber, pointsPerDVIUnit: pointsPerDVIUnit)
             page?.add(.glyph(DVIGlyph(
@@ -234,14 +240,17 @@ final class DVIParser {
                 characterCode: characterCode,
                 x: xPoint(state.h, pointsPerDVIUnit),
                 baselineY: yPoint(state.v, pointsPerDVIUnit),
-                advance: Double(advanceDVI) * pointsPerDVIUnit,
+                advance: Double(metric.widthDVIUnits) * pointsPerDVIUnit,
+                height: Double(metric.heightDVIUnits) * pointsPerDVIUnit,
+                depth: Double(metric.depthDVIUnits) * pointsPerDVIUnit,
+                italicCorrection: Double(metric.italicCorrectionDVIUnits) * pointsPerDVIUnit,
                 fontSize: fontSize,
                 color: state.currentColor
             )))
         }
 
         if moveAfterSet {
-            state.h += advanceDVI
+            state.h += metric.widthDVIUnits
         }
     }
 
@@ -269,15 +278,68 @@ final class DVIParser {
         }
     }
 
-    private func widthDVIUnits(characterCode: Int, fontNumber: Int, pointsPerDVIUnit: Double) -> Int64 {
+    private func characterMetricDVIUnits(
+        characterCode: Int,
+        fontNumber: Int,
+        pointsPerDVIUnit: Double
+    ) -> TFMCharacterMetric {
         guard let font = fonts[fontNumber] else {
-            return fallbackWidthDVIUnits(characterCode: characterCode, scaledSize: Int64(10.0 / pointsPerDVIUnit))
+            return fallbackCharacterMetricDVIUnits(
+                characterCode: characterCode,
+                scaledSize: Int64(10.0 / pointsPerDVIUnit)
+            )
         }
 
-        if let width = metricProvider.metric(for: font.name)?.widthDVIUnits(for: characterCode, scaledSize: font.scaledSize) {
-            return width
+        if let fontMetric = metricProvider.metric(for: font) {
+            validateChecksum(font: font, metric: fontMetric)
+            if let metric = fontMetric.characterMetric(for: characterCode, scaledSize: font.scaledSize) {
+                return metric
+            }
+            return fallbackCharacterMetricDVIUnits(characterCode: characterCode, scaledSize: font.scaledSize)
         }
-        return fallbackWidthDVIUnits(characterCode: characterCode, scaledSize: font.scaledSize)
+
+        if !warnedMissingMetricFonts.contains(fontNumber) {
+            warnings.append("TFM metrics for font \(font.texName) were not found; using estimated metrics.")
+            warnedMissingMetricFonts.insert(fontNumber)
+        }
+        return fallbackCharacterMetricDVIUnits(characterCode: characterCode, scaledSize: font.scaledSize)
+    }
+
+    private func validateChecksum(font: DVIFontDefinition, metric: TFMFontMetric) {
+        guard !warnedChecksumFonts.contains(font.number) else {
+            return
+        }
+        warnedChecksumFonts.insert(font.number)
+
+        guard font.checksum != 0,
+              metric.checksum != 0,
+              font.checksum != metric.checksum else {
+            return
+        }
+        warnings.append("TFM checksum for font \(font.texName) does not match the DVI font definition.")
+    }
+
+    private func fallbackCharacterMetricDVIUnits(characterCode: Int, scaledSize: Int64) -> TFMCharacterMetric {
+        let heightFraction: Double
+        let depthFraction: Double
+        if characterCode == 32 {
+            heightFraction = 0
+            depthFraction = 0
+        } else if let scalar = UnicodeScalar(characterCode),
+                  CharacterSet(charactersIn: "gjpqyQ,;_").contains(scalar) {
+            heightFraction = 0.7
+            depthFraction = 0.2
+        } else {
+            heightFraction = 0.7
+            depthFraction = 0
+        }
+
+        return TFMCharacterMetric(
+            widthDVIUnits: fallbackWidthDVIUnits(characterCode: characterCode, scaledSize: scaledSize),
+            heightDVIUnits: Int64((Double(scaledSize) * heightFraction).rounded()),
+            depthDVIUnits: Int64((Double(scaledSize) * depthFraction).rounded()),
+            italicCorrectionDVIUnits: 0
+        )
     }
 
     private func fallbackWidthDVIUnits(characterCode: Int, scaledSize: Int64) -> Int64 {
@@ -410,8 +472,8 @@ private struct PageBuilder {
         for item in items {
             switch item {
             case .glyph(let glyph):
-                maxX = max(maxX, glyph.x + glyph.advance + 72)
-                maxY = max(maxY, glyph.baselineY + glyph.fontSize + 72)
+                maxX = max(maxX, glyph.x + glyph.advance + glyph.italicCorrection + 72)
+                maxY = max(maxY, glyph.baselineY + glyph.depth + 72)
             case .rule(let rule):
                 maxX = max(maxX, rule.x + rule.width + 72)
                 maxY = max(maxY, rule.y + rule.height + 72)

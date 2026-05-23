@@ -58,6 +58,9 @@ struct DVIGlyph {
     let x: Double
     let baselineY: Double
     let advance: Double
+    let height: Double
+    let depth: Double
+    let italicCorrection: Double
     let fontSize: Double
     let color: DVIColor
 }
