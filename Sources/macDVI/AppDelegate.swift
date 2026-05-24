@@ -14,14 +14,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         buildMenu()
 
-        if pendingFileURLs.isEmpty {
+        let urls = pendingFileURLs
+        pendingFileURLs.removeAll()
+        for url in urls {
+            newWindow(opening: url)
+        }
+        if controllers.isEmpty {
             newWindow(opening: nil)
-        } else {
-            let urls = pendingFileURLs
-            pendingFileURLs.removeAll()
-            for url in urls {
-                newWindow(opening: url)
-            }
         }
     }
 
