@@ -2,58 +2,93 @@ import CoreGraphics
 import CoreText
 import Foundation
 
-final class Type1Font {
+enum OutlineFontKind {
+    case type1
+    case openType
+}
+
+final class OutlineFont {
+    let kind: OutlineFontKind
     let postScriptName: String
     let unitsPerEm: Double
 
     private let cgFont: CGFont
     private let ctFont: CTFont
-    private var pathCache: [String: CGPath] = [:]
-    private var missingGlyphs: Set<String> = []
+    private var pathCache: [PathCacheKey: CGPath] = [:]
+    private var missingGlyphs: Set<PathCacheKey> = []
 
     init(url: URL) throws {
         let data = try Data(contentsOf: url)
         guard let provider = CGDataProvider(data: data as CFData) else {
-            throw DVIError.malformed("could not create data provider for Type 1 font at \(url.path)")
+            throw DVIError.malformed("could not create data provider for font at \(url.path)")
         }
         guard let cg = CGFont(provider) else {
-            throw DVIError.malformed("could not load Type 1 font at \(url.path)")
+            throw DVIError.malformed("could not load font at \(url.path)")
         }
 
         cgFont = cg
         unitsPerEm = cg.unitsPerEm > 0 ? Double(cg.unitsPerEm) : 1000
         postScriptName = (cg.postScriptName as String?) ?? url.deletingPathExtension().lastPathComponent
-
-        let matrix = CGAffineTransform.identity
         ctFont = CTFontCreateWithGraphicsFont(cg, CGFloat(unitsPerEm), nil, nil)
-        _ = matrix
+
+        let ext = url.pathExtension.lowercased()
+        kind = (ext == "pfb" || ext == "pfa") ? .type1 : .openType
     }
 
     func path(forGlyphNamed name: String) -> CGPath? {
-        if let cached = pathCache[name] {
-            return cached
-        }
-        if missingGlyphs.contains(name) {
-            return nil
-        }
+        let key = PathCacheKey.name(name)
+        if let cached = pathCache[key] { return cached }
+        if missingGlyphs.contains(key) { return nil }
+
         let glyph = cgFont.getGlyphWithGlyphName(name: name as CFString)
         guard glyph != 0 || name == ".notdef" else {
-            missingGlyphs.insert(name)
+            missingGlyphs.insert(key)
             return nil
         }
         guard let path = CTFontCreatePathForGlyph(ctFont, glyph, nil) else {
-            missingGlyphs.insert(name)
+            missingGlyphs.insert(key)
             return nil
         }
-        pathCache[name] = path
+        pathCache[key] = path
         return path
+    }
+
+    func path(forUnicode scalar: UInt32) -> CGPath? {
+        let key = PathCacheKey.unicode(scalar)
+        if let cached = pathCache[key] { return cached }
+        if missingGlyphs.contains(key) { return nil }
+
+        guard let unicode = UnicodeScalar(scalar) else {
+            missingGlyphs.insert(key)
+            return nil
+        }
+        let utf16 = Array(String(unicode).utf16)
+        var glyphs = Array<CGGlyph>(repeating: 0, count: utf16.count)
+        let mapped = utf16.withUnsafeBufferPointer { buf in
+            CTFontGetGlyphsForCharacters(ctFont, buf.baseAddress!, &glyphs, utf16.count)
+        }
+        guard mapped, let glyph = glyphs.first, glyph != 0 else {
+            missingGlyphs.insert(key)
+            return nil
+        }
+        guard let path = CTFontCreatePathForGlyph(ctFont, glyph, nil) else {
+            missingGlyphs.insert(key)
+            return nil
+        }
+        pathCache[key] = path
+        return path
+    }
+
+    private enum PathCacheKey: Hashable {
+        case name(String)
+        case unicode(UInt32)
     }
 }
 
-final class Type1FontProvider {
-    private var cache: [String: Type1Font] = [:]
+final class OutlineFontProvider {
+    private var cache: [String: OutlineFont] = [:]
     private var missingFonts: Set<String> = []
-    private var mapEntries: [String: Type1MapEntry]?
+    private var mapEntries: [String: FontMapEntry]?
     private let searchDirectories: [URL]
 
     init(documentURL: URL) {
@@ -63,7 +98,7 @@ final class Type1FontProvider {
         ]
     }
 
-    func font(for definition: DVIFontDefinition) -> Type1Font? {
+    func font(for definition: DVIFontDefinition) -> OutlineFont? {
         let key = definition.texName.lowercased()
         if let cached = cache[key] {
             return cached
@@ -73,7 +108,7 @@ final class Type1FontProvider {
         }
 
         guard let url = fontURL(for: definition),
-              let font = try? Type1Font(url: url) else {
+              let font = try? OutlineFont(url: url) else {
             missingFonts.insert(key)
             return nil
         }
@@ -131,7 +166,7 @@ final class Type1FontProvider {
             ? [definition.name]
             : [definition.area + definition.name, definition.name]
         return names.flatMap { name in
-            ["\(name).pfb", "\(name).pfa"]
+            ["\(name).otf", "\(name).ttf", "\(name).pfb", "\(name).pfa"]
         }
     }
 
@@ -145,22 +180,22 @@ final class Type1FontProvider {
         return nil
     }
 
-    private func mapEntry(for fontName: String) -> Type1MapEntry? {
+    private func mapEntry(for fontName: String) -> FontMapEntry? {
         if mapEntries == nil {
-            mapEntries = Type1MapLoader.loadEntries()
+            mapEntries = FontMapLoader.loadEntries()
         }
         return mapEntries?[fontName.lowercased()]
     }
 }
 
-private struct Type1MapEntry {
+private struct FontMapEntry {
     let postScriptName: String
     let fileName: String
 }
 
-private enum Type1MapLoader {
-    static func loadEntries() -> [String: Type1MapEntry] {
-        var entries: [String: Type1MapEntry] = [:]
+private enum FontMapLoader {
+    static func loadEntries() -> [String: FontMapEntry] {
+        var entries: [String: FontMapEntry] = [:]
         for mapName in ["pdftex.map", "psfonts.map"] {
             guard let path = TeXFileLocator.findFile(named: mapName),
                   let text = try? String(contentsOfFile: path, encoding: .utf8) else {
@@ -174,7 +209,7 @@ private enum Type1MapLoader {
         return entries
     }
 
-    private static func parseLine(_ line: String) -> (key: String, value: Type1MapEntry)? {
+    private static func parseLine(_ line: String) -> (key: String, value: FontMapEntry)? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.hasPrefix("%"), !trimmed.hasPrefix("#") else {
             return nil
@@ -186,7 +221,10 @@ private enum Type1MapLoader {
         }
         guard let fileToken = tokens.first(where: { token in
             let lowercased = token.lowercased()
-            return lowercased.contains(".pfb") || lowercased.contains(".pfa")
+            return lowercased.contains(".pfb")
+                || lowercased.contains(".pfa")
+                || lowercased.contains(".otf")
+                || lowercased.contains(".ttf")
         }) else {
             return nil
         }
@@ -195,7 +233,7 @@ private enum Type1MapLoader {
             .trimmingCharacters(in: CharacterSet(charactersIn: "<>[]"))
         return (
             key: tokens[0].lowercased(),
-            value: Type1MapEntry(postScriptName: tokens[1], fileName: fileName)
+            value: FontMapEntry(postScriptName: tokens[1], fileName: fileName)
         )
     }
 
@@ -224,3 +262,6 @@ private enum Type1MapLoader {
         return tokens
     }
 }
+
+typealias Type1Font = OutlineFont
+typealias Type1FontProvider = OutlineFontProvider

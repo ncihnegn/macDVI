@@ -98,10 +98,9 @@ final class DVIDocumentView: NSView {
         let definition = document.fonts[glyph.fontNumber]
         let texName = definition?.name ?? ""
         if let definition,
-           let type1Font = type1FontProvider?.font(for: definition),
-           let glyphName = TeXGlyphMapper.glyphName(for: glyph.characterCode, fontName: texName),
-           let glyphPath = type1Font.path(forGlyphNamed: glyphName) {
-            draw(type1Path: glyphPath, font: type1Font, glyph: glyph, in: pageRect)
+           let outlineFont = type1FontProvider?.font(for: definition),
+           let glyphPath = outlinePath(for: glyph, font: outlineFont, texName: texName) {
+            draw(type1Path: glyphPath, font: outlineFont, glyph: glyph, in: pageRect)
             return
         }
 
@@ -116,6 +115,24 @@ final class DVIDocumentView: NSView {
         let baseline = pageRect.minY + CGFloat(glyph.baselineY) * zoom
         let y = baseline - font.ascender
         (text as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
+    }
+
+    private func outlinePath(for glyph: DVIGlyph, font: OutlineFont, texName: String) -> CGPath? {
+        let glyphName = TeXGlyphMapper.glyphName(for: glyph.characterCode, fontName: texName)
+        if font.kind == .type1, let glyphName, let path = font.path(forGlyphNamed: glyphName) {
+            return path
+        }
+        let mapped = TeXGlyphMapper.string(for: glyph.characterCode, fontName: texName)
+        if let scalar = mapped.unicodeScalars.first, let path = font.path(forUnicode: scalar.value) {
+            return path
+        }
+        if let glyphName, let path = font.path(forGlyphNamed: glyphName) {
+            return path
+        }
+        if let scalar = UnicodeScalar(glyph.characterCode), let path = font.path(forUnicode: scalar.value) {
+            return path
+        }
+        return nil
     }
 
     private func draw(type1Path: CGPath, font: Type1Font, glyph: DVIGlyph, in pageRect: NSRect) {
