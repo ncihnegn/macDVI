@@ -191,7 +191,7 @@ final class TFMFontMetricProvider {
         }
 
         for name in kpathseaNames(fontName: fontName, area: area) {
-            if let path = Kpathsea.findTFM(named: name),
+            if let path = TeXFileLocator.findTFM(named: name),
                let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
                let metric = try? TFMFontMetric(data: data) {
                 return metric
@@ -234,48 +234,6 @@ private struct TFMCharacterInfo {
     let italicIndex: Int
     let tag: Int
     let remainder: Int
-}
-
-private enum Kpathsea {
-    static func findTFM(named fontName: String) -> String? {
-        let executable = executablePath()
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = executable.hasSuffix("/env")
-            ? ["kpsewhich", "\(fontName).tfm"]
-            : ["\(fontName).tfm"]
-
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-
-        guard process.terminationStatus == 0 else {
-            return nil
-        }
-
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        let path = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return path?.isEmpty == false ? path : nil
-    }
-
-    private static func executablePath() -> String {
-        let common = [
-            "/Library/TeX/texbin/kpsewhich",
-            "/usr/texbin/kpsewhich"
-        ]
-        for path in common where FileManager.default.isExecutableFile(atPath: path) {
-            return path
-        }
-        return "/usr/bin/env"
-    }
 }
 
 private struct TFMReader {

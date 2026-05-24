@@ -17,6 +17,13 @@ if let inspectIndex = arguments.firstIndex(of: "--inspect") {
         print("DVI: \(url.lastPathComponent)")
         print("Pages: \(document.pages.count)")
         print("Fonts: \(document.fonts.values.map { $0.name }.sorted().joined(separator: ", "))")
+        let type1Provider = Type1FontProvider(documentURL: url)
+        let type1Fonts = document.fonts.values
+            .compactMap { type1Provider.font(for: $0)?.postScriptName }
+            .sorted()
+        if !type1Fonts.isEmpty {
+            print("Type 1 fonts: \(type1Fonts.joined(separator: ", "))")
+        }
         if !document.warnings.isEmpty {
             print("Warnings: \(document.warnings.count)")
         }

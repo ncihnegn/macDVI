@@ -4,6 +4,11 @@ final class DVIDocumentView: NSView {
     var document: DVIDocument? {
         didSet {
             fontCache.removeAll()
+            if let document {
+                type1FontProvider = Type1FontProvider(documentURL: document.url)
+            } else {
+                type1FontProvider = nil
+            }
             updateFrameSize()
             needsDisplay = true
         }
@@ -25,6 +30,7 @@ final class DVIDocumentView: NSView {
     private let pageGap: CGFloat = 28
     private let pageInset: CGFloat = 36
     private var fontCache: [FontCacheKey: NSFont] = [:]
+    private var type1FontProvider: Type1FontProvider?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -91,6 +97,14 @@ final class DVIDocumentView: NSView {
     private func draw(glyph: DVIGlyph, in pageRect: NSRect, document: DVIDocument) {
         let definition = document.fonts[glyph.fontNumber]
         let texName = definition?.name ?? ""
+        if let definition,
+           let type1Font = type1FontProvider?.font(for: definition),
+           let glyphName = TeXGlyphMapper.glyphName(for: glyph.characterCode, fontName: texName),
+           let glyphPath = type1Font.path(forGlyphNamed: glyphName) {
+            draw(type1Path: glyphPath, font: type1Font, glyph: glyph, in: pageRect)
+            return
+        }
+
         let font = renderFont(for: definition, glyph: glyph)
         let text = TeXGlyphMapper.string(for: glyph.characterCode, fontName: texName)
         let attributes: [NSAttributedString.Key: Any] = [
@@ -102,6 +116,21 @@ final class DVIDocumentView: NSView {
         let baseline = pageRect.minY + CGFloat(glyph.baselineY) * zoom
         let y = baseline - font.ascender
         (text as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
+    }
+
+    private func draw(type1Path: CGPath, font: Type1Font, glyph: DVIGlyph, in pageRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let x = pageRect.minX + CGFloat(glyph.x) * zoom
+        let baseline = pageRect.minY + CGFloat(glyph.baselineY) * zoom
+        let scale = max(CGFloat(glyph.fontSize) * zoom / CGFloat(font.unitsPerEm), 0.001)
+
+        context.saveGState()
+        context.translateBy(x: x, y: baseline)
+        context.scaleBy(x: scale, y: -scale)
+        context.addPath(type1Path)
+        context.setFillColor(NSColor(dviColor: glyph.color).cgColor)
+        context.fillPath()
+        context.restoreGState()
     }
 
     private func draw(rule: DVIRule, in pageRect: NSRect) {
