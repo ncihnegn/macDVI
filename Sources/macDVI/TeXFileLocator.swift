@@ -34,6 +34,40 @@ enum TeXFileLocator {
         findFile(named: "\(fontName).tfm")
     }
 
+    static func findPK(named fontName: String) -> String? {
+        findFile(named: fontName, format: "pk")
+    }
+
+    static func findFile(named fileName: String, format: String) -> String? {
+        let executable = executablePath()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        let formatArg = "--format=\(format)"
+        process.arguments = executable.hasSuffix("/env")
+            ? ["kpsewhich", formatArg, fileName]
+            : [formatArg, fileName]
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else {
+            return nil
+        }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let path = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return path?.isEmpty == false ? path : nil
+    }
+
     private static func executablePath() -> String {
         let common = [
             "/Library/TeX/texbin/kpsewhich",

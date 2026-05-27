@@ -6,8 +6,10 @@ final class DVIDocumentView: NSView {
             fontCache.removeAll()
             if let document {
                 type1FontProvider = Type1FontProvider(documentURL: document.url)
+                pkFontProvider = PKFontProvider(documentURL: document.url)
             } else {
                 type1FontProvider = nil
+                pkFontProvider = nil
             }
             updateFrameSize()
             needsDisplay = true
@@ -31,6 +33,7 @@ final class DVIDocumentView: NSView {
     private let pageInset: CGFloat = 36
     private var fontCache: [FontCacheKey: NSFont] = [:]
     private var type1FontProvider: Type1FontProvider?
+    private var pkFontProvider: PKFontProvider?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -104,6 +107,13 @@ final class DVIDocumentView: NSView {
             return
         }
 
+        if let definition,
+           let pkFont = pkFontProvider?.font(for: definition),
+           let pkGlyph = pkFont.glyphs[glyph.characterCode],
+           drawPKGlyph(pkGlyph, font: pkFont, definition: definition, glyph: glyph, in: pageRect) {
+            return
+        }
+
         let font = renderFont(for: definition, glyph: glyph)
         let text = TeXGlyphMapper.string(for: glyph.characterCode, fontName: texName)
         let attributes: [NSAttributedString.Key: Any] = [
@@ -115,6 +125,43 @@ final class DVIDocumentView: NSView {
         let baseline = pageRect.minY + CGFloat(glyph.baselineY) * zoom
         let y = baseline - font.ascender
         (text as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
+    }
+
+    private func drawPKGlyph(
+        _ pkGlyph: PKGlyph,
+        font: PKFont,
+        definition: DVIFontDefinition,
+        glyph: DVIGlyph,
+        in pageRect: NSRect
+    ) -> Bool {
+        guard pkGlyph.width > 0, pkGlyph.height > 0,
+              let provider = pkFontProvider,
+              let mask = provider.maskImage(for: pkGlyph, fontKey: definition.texName.lowercased()),
+              let context = NSGraphicsContext.current?.cgContext else {
+            return false
+        }
+
+        let pointsPerPixel = font.pointsPerPixel
+        let scale = CGFloat(pointsPerPixel) * zoom
+        let x = pageRect.minX + CGFloat(glyph.x) * zoom - CGFloat(pkGlyph.hoff) * scale
+        let baseline = pageRect.minY + CGFloat(glyph.baselineY) * zoom
+        let top = baseline - CGFloat(pkGlyph.voff) * scale
+        let drawRect = CGRect(
+            x: x,
+            y: top,
+            width: CGFloat(pkGlyph.width) * scale,
+            height: CGFloat(pkGlyph.height) * scale
+        )
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.translateBy(x: drawRect.minX, y: drawRect.maxY)
+        context.scaleBy(x: 1, y: -1)
+        let local = CGRect(x: 0, y: 0, width: drawRect.width, height: drawRect.height)
+        context.clip(to: local, mask: mask)
+        context.setFillColor(NSColor(dviColor: glyph.color).cgColor)
+        context.fill(local)
+        return true
     }
 
     private func outlinePath(for glyph: DVIGlyph, font: OutlineFont, texName: String) -> CGPath? {
