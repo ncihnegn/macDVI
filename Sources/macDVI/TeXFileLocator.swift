@@ -38,6 +38,10 @@ enum TeXFileLocator {
         findFile(named: fontName, format: "pk")
     }
 
+    static func findGF(named fontName: String) -> String? {
+        findFile(named: fontName, format: "gf")
+    }
+
     static func findFile(named fileName: String, format: String) -> String? {
         let executable = executablePath()
         let process = Process()

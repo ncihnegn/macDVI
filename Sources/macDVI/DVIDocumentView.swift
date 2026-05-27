@@ -7,9 +7,11 @@ final class DVIDocumentView: NSView {
             if let document {
                 type1FontProvider = Type1FontProvider(documentURL: document.url)
                 pkFontProvider = PKFontProvider(documentURL: document.url)
+                gfFontProvider = GFFontProvider(documentURL: document.url)
             } else {
                 type1FontProvider = nil
                 pkFontProvider = nil
+                gfFontProvider = nil
             }
             updateFrameSize()
             needsDisplay = true
@@ -34,6 +36,7 @@ final class DVIDocumentView: NSView {
     private var fontCache: [FontCacheKey: NSFont] = [:]
     private var type1FontProvider: Type1FontProvider?
     private var pkFontProvider: PKFontProvider?
+    private var gfFontProvider: GFFontProvider?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -114,6 +117,13 @@ final class DVIDocumentView: NSView {
             return
         }
 
+        if let definition,
+           let gfFont = gfFontProvider?.font(for: definition),
+           let gfGlyph = gfFont.glyphs[glyph.characterCode],
+           drawGFGlyph(gfGlyph, font: gfFont, definition: definition, glyph: glyph, in: pageRect) {
+            return
+        }
+
         let font = renderFont(for: definition, glyph: glyph)
         let text = TeXGlyphMapper.string(for: glyph.characterCode, fontName: texName)
         let attributes: [NSAttributedString.Key: Any] = [
@@ -151,6 +161,43 @@ final class DVIDocumentView: NSView {
             y: top,
             width: CGFloat(pkGlyph.width) * scale,
             height: CGFloat(pkGlyph.height) * scale
+        )
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.translateBy(x: drawRect.minX, y: drawRect.maxY)
+        context.scaleBy(x: 1, y: -1)
+        let local = CGRect(x: 0, y: 0, width: drawRect.width, height: drawRect.height)
+        context.clip(to: local, mask: mask)
+        context.setFillColor(NSColor(dviColor: glyph.color).cgColor)
+        context.fill(local)
+        return true
+    }
+
+    private func drawGFGlyph(
+        _ gfGlyph: GFGlyph,
+        font: GFFont,
+        definition: DVIFontDefinition,
+        glyph: DVIGlyph,
+        in pageRect: NSRect
+    ) -> Bool {
+        guard gfGlyph.width > 0, gfGlyph.height > 0,
+              let provider = gfFontProvider,
+              let mask = provider.maskImage(for: gfGlyph, fontKey: definition.texName.lowercased()),
+              let context = NSGraphicsContext.current?.cgContext else {
+            return false
+        }
+
+        let pointsPerPixel = font.pointsPerPixel
+        let scale = CGFloat(pointsPerPixel) * zoom
+        let x = pageRect.minX + CGFloat(glyph.x) * zoom - CGFloat(gfGlyph.hoff) * scale
+        let baseline = pageRect.minY + CGFloat(glyph.baselineY) * zoom
+        let top = baseline - CGFloat(gfGlyph.voff) * scale
+        let drawRect = CGRect(
+            x: x,
+            y: top,
+            width: CGFloat(gfGlyph.width) * scale,
+            height: CGFloat(gfGlyph.height) * scale
         )
 
         context.saveGState()
