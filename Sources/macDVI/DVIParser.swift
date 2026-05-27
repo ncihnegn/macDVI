@@ -4,6 +4,7 @@ final class DVIParser {
     private let url: URL
     private let data: Data
     private let metricProvider: TFMFontMetricProvider
+    private let virtualFontProvider: VirtualFontProvider
     private let pageOriginOffsetPoints = 72.0
     private let defaultMediaSize = CGSize(width: 612, height: 792)
 
@@ -12,11 +13,16 @@ final class DVIParser {
     private var warnings: [String] = []
     private var warnedMissingMetricFonts: Set<Int> = []
     private var warnedChecksumFonts: Set<Int> = []
+    private var virtualFontMappings: [Int: [Int: Int]] = [:]
+    private var nextSyntheticFontNumber: Int = 1_000_000
+    private var virtualFontExpansionDepth = 0
+    private let maxVirtualFontExpansionDepth = 16
 
     init(url: URL) throws {
         self.url = url
         self.data = try Data(contentsOf: url)
         self.metricProvider = TFMFontMetricProvider(documentURL: url)
+        self.virtualFontProvider = VirtualFontProvider(documentURL: url)
         if data.isEmpty {
             throw DVIError.emptyFile
         }
@@ -228,6 +234,24 @@ final class DVIParser {
             return
         }
 
+        if let definition = fonts[fontNumber],
+           let virtualFont = virtualFontProvider.virtualFont(for: definition),
+           let packet = virtualFont.packets[characterCode] {
+            try expandVirtualPacket(
+                packet: packet,
+                outerFontNumber: fontNumber,
+                outerFont: definition,
+                virtualFont: virtualFont,
+                state: &state,
+                page: &page,
+                pointsPerDVIUnit: pointsPerDVIUnit
+            )
+            if moveAfterSet {
+                state.h += scaleVFWidth(packet.widthFix, outerScaledSize: definition.scaledSize)
+            }
+            return
+        }
+
         let metric = characterMetricDVIUnits(
             characterCode: characterCode,
             fontNumber: fontNumber,
@@ -252,6 +276,185 @@ final class DVIParser {
         if moveAfterSet {
             state.h += metric.widthDVIUnits
         }
+    }
+
+    private func expandVirtualPacket(
+        packet: VFCharacterPacket,
+        outerFontNumber: Int,
+        outerFont: DVIFontDefinition,
+        virtualFont: VirtualFont,
+        state: inout DVIState,
+        page: inout PageBuilder?,
+        pointsPerDVIUnit: Double
+    ) throws {
+        guard virtualFontExpansionDepth < maxVirtualFontExpansionDepth else {
+            warnings.append("Virtual font expansion depth limit reached for \(outerFont.texName).")
+            return
+        }
+        virtualFontExpansionDepth += 1
+        defer { virtualFontExpansionDepth -= 1 }
+
+        let mapping = synthesizeLocalFontMapping(
+            for: outerFontNumber,
+            outerFont: outerFont,
+            virtualFont: virtualFont
+        )
+
+        var localState = DVIState()
+        localState.h = state.h
+        localState.v = state.v
+        localState.currentColor = state.currentColor
+        localState.colorStack = state.colorStack
+        if let firstLocal = virtualFont.localFonts.first,
+           let outer = mapping[firstLocal.localNumber] {
+            localState.currentFontNumber = outer
+        } else {
+            localState.currentFontNumber = outerFontNumber
+        }
+
+        var packetReader = DVIByteReader(data: packet.dviCommands)
+        try runVFSubroutine(
+            reader: &packetReader,
+            state: &localState,
+            page: &page,
+            pointsPerDVIUnit: pointsPerDVIUnit,
+            mapping: mapping
+        )
+    }
+
+    private func runVFSubroutine(
+        reader: inout DVIByteReader,
+        state: inout DVIState,
+        page: inout PageBuilder?,
+        pointsPerDVIUnit: Double,
+        mapping: [Int: Int]
+    ) throws {
+        while !reader.isAtEnd {
+            let opcode = try reader.readByte()
+            switch opcode {
+            case 0...127:
+                try setCharacter(Int(opcode), moveAfterSet: true, state: &state, page: &page, pointsPerDVIUnit: pointsPerDVIUnit)
+            case 128...131:
+                let code = Int(try reader.readUnsigned(Int(opcode - 127)))
+                try setCharacter(code, moveAfterSet: true, state: &state, page: &page, pointsPerDVIUnit: pointsPerDVIUnit)
+            case 132:
+                let height = try reader.readSigned(4)
+                let width = try reader.readSigned(4)
+                putRule(height: height, width: width, moveAfterSet: true, state: &state, page: &page, pointsPerDVIUnit: pointsPerDVIUnit)
+            case 133...136:
+                let code = Int(try reader.readUnsigned(Int(opcode - 132)))
+                try setCharacter(code, moveAfterSet: false, state: &state, page: &page, pointsPerDVIUnit: pointsPerDVIUnit)
+            case 137:
+                let height = try reader.readSigned(4)
+                let width = try reader.readSigned(4)
+                putRule(height: height, width: width, moveAfterSet: false, state: &state, page: &page, pointsPerDVIUnit: pointsPerDVIUnit)
+            case 138:
+                continue
+            case 141:
+                state.stack.append(DVIStackFrame(h: state.h, v: state.v, w: state.w, x: state.x, y: state.y, z: state.z))
+            case 142:
+                guard let frame = state.stack.popLast() else {
+                    throw DVIError.malformed("VF: pop with empty stack")
+                }
+                state.h = frame.h
+                state.v = frame.v
+                state.w = frame.w
+                state.x = frame.x
+                state.y = frame.y
+                state.z = frame.z
+            case 143...146:
+                state.h += try reader.readSigned(Int(opcode - 142))
+            case 147:
+                state.h += state.w
+            case 148...151:
+                let value = try reader.readSigned(Int(opcode - 147))
+                state.w = value
+                state.h += value
+            case 152:
+                state.h += state.x
+            case 153...156:
+                let value = try reader.readSigned(Int(opcode - 152))
+                state.x = value
+                state.h += value
+            case 157...160:
+                state.v += try reader.readSigned(Int(opcode - 156))
+            case 161:
+                state.v += state.y
+            case 162...165:
+                let value = try reader.readSigned(Int(opcode - 161))
+                state.y = value
+                state.v += value
+            case 166:
+                state.v += state.z
+            case 167...170:
+                let value = try reader.readSigned(Int(opcode - 165))
+                state.z = value
+                state.v += value
+            case 171...234:
+                let local = Int(opcode - 171)
+                state.currentFontNumber = mapping[local]
+            case 235...238:
+                let local = Int(try reader.readUnsigned(Int(opcode - 234)))
+                state.currentFontNumber = mapping[local]
+            case 239...242:
+                let length = Int(try reader.readUnsigned(Int(opcode - 238)))
+                _ = try reader.readBytes(length)
+            default:
+                throw DVIError.malformed("VF: unsupported opcode \(opcode)")
+            }
+        }
+    }
+
+    private func synthesizeLocalFontMapping(
+        for outerFontNumber: Int,
+        outerFont: DVIFontDefinition,
+        virtualFont: VirtualFont
+    ) -> [Int: Int] {
+        if let cached = virtualFontMappings[outerFontNumber] {
+            return cached
+        }
+
+        var mapping: [Int: Int] = [:]
+        let outerScaled = outerFont.scaledSize
+        let vfDesign = virtualFont.designSize > 0 ? virtualFont.designSize : (1 << 20)
+
+        for local in virtualFont.localFonts {
+            let scaled = scaleLocalFontSize(
+                localScaled: local.scaledSize,
+                outerScaled: outerScaled,
+                vfDesignSize: vfDesign
+            )
+            let synthesizedNumber = nextSyntheticFontNumber
+            nextSyntheticFontNumber += 1
+            let definition = DVIFontDefinition(
+                number: synthesizedNumber,
+                checksum: local.checksum,
+                scaledSize: scaled,
+                designSize: local.designSize,
+                area: local.area,
+                name: local.name
+            )
+            fonts[synthesizedNumber] = definition
+            mapping[local.localNumber] = synthesizedNumber
+        }
+
+        virtualFontMappings[outerFontNumber] = mapping
+        return mapping
+    }
+
+    private func scaleLocalFontSize(
+        localScaled: Int64,
+        outerScaled: Int64,
+        vfDesignSize: Int64
+    ) -> Int64 {
+        guard vfDesignSize > 0 else { return localScaled }
+        let product = Double(localScaled) * Double(outerScaled) / Double(vfDesignSize)
+        return Int64(product.rounded())
+    }
+
+    private func scaleVFWidth(_ widthFix: Int64, outerScaledSize: Int64) -> Int64 {
+        let value = Double(widthFix) * Double(outerScaledSize) / Double(1 << 20)
+        return Int64(value.rounded())
     }
 
     private func putRule(
