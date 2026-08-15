@@ -172,9 +172,29 @@ final class DocumentWindowController: NSWindowController {
         pdfView.displayMode = .singlePageContinuous
         pdfView.displaysPageBreaks = true
         pdfView.backgroundColor = .windowBackgroundColor
-        pdfView.document = PDFDocument(url: url)
+        let document = PDFDocument(url: url)
+        pdfView.document = document
         replaceContent(with: pdfView)
         pinToContainer(pdfView)
+        if let firstPage = document?.page(at: 0) {
+            positionPDFViewAtTop(pdfView, page: firstPage)
+            DispatchQueue.main.async { [weak self, weak pdfView] in
+                guard let self, let pdfView else { return }
+                self.positionPDFViewAtTop(pdfView, page: firstPage)
+            }
+        }
+    }
+
+    private func positionPDFViewAtTop(_ pdfView: PDFView, page: PDFPage) {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        pdfView.layoutDocumentView()
+
+        let pageBounds = page.bounds(for: pdfView.displayBox)
+        let topOfPage = PDFDestination(
+            page: page,
+            at: CGPoint(x: pageBounds.midX, y: pageBounds.maxY)
+        )
+        pdfView.go(to: topOfPage)
     }
 
     private func showNative(document: DVIDocument) {
