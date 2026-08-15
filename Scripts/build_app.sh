@@ -52,7 +52,7 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
-            <string>Alternate</string>
+            <string>Owner</string>
         </dict>
         <dict>
             <key>CFBundleTypeExtensions</key>
@@ -65,7 +65,7 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
             <key>CFBundleTypeRole</key>
             <string>Viewer</string>
             <key>LSHandlerRank</key>
-            <string>Alternate</string>
+            <string>Owner</string>
         </dict>
     </array>
 </dict>
