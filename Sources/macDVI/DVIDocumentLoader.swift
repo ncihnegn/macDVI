@@ -28,6 +28,13 @@ struct DVIDocumentLoadError: LocalizedError {
 
 enum DVIDocumentLoader {
     static func load(url: URL) throws -> DVIDocumentLoadResult {
+        switch url.pathExtension.lowercased() {
+        case "ps", "eps":
+            return .pdf(try PostScriptToPDFConverter.convert(postScriptURL: url))
+        default:
+            break
+        }
+
         do {
             let document = try DVIParser(url: url).parse()
             return .native(document)

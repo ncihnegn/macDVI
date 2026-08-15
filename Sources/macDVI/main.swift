@@ -38,7 +38,7 @@ if let loadTestIndex = arguments.firstIndex(of: "--load-test") {
     var loadTestArguments = arguments
     loadTestArguments.remove(at: loadTestIndex)
     guard let path = loadTestArguments.first else {
-        FileHandle.standardError.write(Data("usage: macDVI --load-test path/to/file.dvi\n".utf8))
+        FileHandle.standardError.write(Data("usage: macDVI --load-test path/to/file\n".utf8))
         exit(64)
     }
 

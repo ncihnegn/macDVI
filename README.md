@@ -2,7 +2,7 @@
 
 An AppKit DVI viewer for macOS.
 
-The viewer opens `.dvi` files in a native macOS window. It renders DVI files directly with a built-in parser and AppKit renderer that handles pages, positioning, text, rules, zooming, TeX font metrics, Type 1 outline fonts, PK and GF bitmap fonts, virtual fonts (`.vf`), full Computer Modern glyph mapping (OT1, OT1tt, OML, OMS, OMX, MSAM, MSBM, and T1 / Cork encodings), page-size specials, and common color specials. If the native parser cannot read a file, the app can still fall back to `dvipdfmx` and PDFKit when a TeX converter is installed.
+The viewer opens `.dvi`, `.ps`, and `.eps` files in a native macOS window. It renders DVI files directly with a built-in parser and AppKit renderer that handles pages, positioning, text, rules, zooming, TeX font metrics, Type 1 outline fonts, PK and GF bitmap fonts, virtual fonts (`.vf`), full Computer Modern glyph mapping (OT1, OT1tt, OML, OMS, OMX, MSAM, MSBM, and T1 / Cork encodings), page-size specials, and common color specials. PostScript and EPS files are converted to PDF with Ghostscript and displayed with PDFKit. If the native parser cannot read a DVI file, the app can still fall back to `dvipdfmx` and PDFKit when a TeX converter is installed.
 
 ## Build and Run
 
@@ -76,4 +76,6 @@ Upload `build/macDVI.dmg` to your release host (GitHub Releases, S3, a static si
 - GF bitmap fonts (`.gf`, `.600gf`, `.300gf`, `.1200gf`) are resolved next to the document and through `kpsewhich --format=gf`; glyphs are decoded from paint/skip/new-row opcodes and drawn as masked fills using the same pipeline as PK.
 - Computer Modern character codes are mapped to Unicode and PostScript glyph names per font encoding (OT1, OT1tt, OML, OMS, OMX, MSAM, MSBM, T1) so outline glyphs resolve correctly across text, math, and AMS fonts.
 - The optional converter fallback requires `dvipdfmx` on the path or in `/Library/TeX/texbin`.
+- PostScript and EPS viewing requires Ghostscript (`gs`) on the path or in a standard installation directory such as `/usr/local/bin`.
+- Ghostscript is an external dependency and has separate AGPL and commercial licensing options; review its license before distributing it with the application.
 - The native renderer is intended for inspection and simple DVI documents.

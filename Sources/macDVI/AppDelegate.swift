@@ -79,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.window?.delegate = self
         controller.showWindow(nil)
         if let url {
-            controller.openDVI(url: url)
+            controller.openDocument(url: url)
         }
         return controller
     }

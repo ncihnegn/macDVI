@@ -1,9 +1,10 @@
 import AppKit
+import UniformTypeIdentifiers
 import PDFKit
 
 final class DocumentWindowController: NSWindowController {
     private let contentContainer = NSView()
-    private let statusField = NSTextField(labelWithString: "Open a DVI file")
+    private let statusField = NSTextField(labelWithString: "Open a document")
     private var pdfView: PDFView?
     private var dviView: DVIDocumentView?
     private var currentURL: URL?
@@ -28,7 +29,7 @@ final class DocumentWindowController: NSWindowController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func openDVI(url: URL) {
+    func openDocument(url: URL) {
         currentURL = url
         window?.title = url.lastPathComponent
         showLoading(message: "Opening \(url.lastPathComponent)...")
@@ -43,12 +44,14 @@ final class DocumentWindowController: NSWindowController {
 
     @objc func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.init(filenameExtension: "dvi")!]
+        panel.allowedContentTypes = ["dvi", "ps", "eps"].compactMap {
+            UTType(filenameExtension: $0)
+        }
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.beginSheetModal(for: window!) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
-            self?.openDVI(url: url)
+            self?.openDocument(url: url)
         }
     }
 
@@ -123,7 +126,7 @@ final class DocumentWindowController: NSWindowController {
     }
 
     private func showPlaceholder() {
-        let label = NSTextField(labelWithString: "Open a DVI file")
+        let label = NSTextField(labelWithString: "Open a DVI or PostScript file")
         label.font = NSFont.systemFont(ofSize: 18, weight: .medium)
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -248,11 +251,11 @@ final class DocumentWindowController: NSWindowController {
 
 extension DocumentWindowController: NSToolbarDelegate {
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDVI, .flexibleSpace, .zoomOut, .actualSize, .zoomIn]
+        [.openDocument, .flexibleSpace, .zoomOut, .actualSize, .zoomIn]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDVI, .flexibleSpace, .zoomOut, .actualSize, .zoomIn]
+        [.openDocument, .flexibleSpace, .zoomOut, .actualSize, .zoomIn]
     }
 
     func toolbar(
@@ -264,10 +267,10 @@ extension DocumentWindowController: NSToolbarDelegate {
         item.target = self
 
         switch itemIdentifier {
-        case .openDVI:
+        case .openDocument:
             item.label = "Open"
-            item.paletteLabel = "Open DVI"
-            item.toolTip = "Open a DVI file"
+            item.paletteLabel = "Open Document"
+            item.toolTip = "Open a DVI or PostScript file"
             item.image = NSImage(systemSymbolName: "doc.badge.plus", accessibilityDescription: "Open")
             item.action = #selector(openDocument(_:))
         case .zoomOut:
@@ -297,7 +300,7 @@ extension DocumentWindowController: NSToolbarDelegate {
 }
 
 private extension NSToolbarItem.Identifier {
-    static let openDVI = NSToolbarItem.Identifier("macDVI.toolbar.open")
+    static let openDocument = NSToolbarItem.Identifier("macDVI.toolbar.open")
     static let zoomOut = NSToolbarItem.Identifier("macDVI.toolbar.zoomOut")
     static let actualSize = NSToolbarItem.Identifier("macDVI.toolbar.actualSize")
     static let zoomIn = NSToolbarItem.Identifier("macDVI.toolbar.zoomIn")
