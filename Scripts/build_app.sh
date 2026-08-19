@@ -57,6 +57,18 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
         <dict>
             <key>CFBundleTypeExtensions</key>
             <array>
+                <string>xdv</string>
+            </array>
+            <key>CFBundleTypeName</key>
+            <string>XeTeX XDV Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+        </dict>
+        <dict>
+            <key>CFBundleTypeExtensions</key>
+            <array>
                 <string>ps</string>
                 <string>eps</string>
             </array>

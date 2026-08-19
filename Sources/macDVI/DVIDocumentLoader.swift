@@ -28,12 +28,16 @@ struct DVIDocumentLoadError: LocalizedError {
 
 enum DVIDocumentLoader {
     static func load(url: URL) throws -> DVIDocumentLoadResult {
-        switch url.pathExtension.lowercased() {
+        let ext = url.pathExtension.lowercased()
+
+        switch ext {
         case "ps", "eps":
             return .pdf(try PostScriptToPDFConverter.convert(postScriptURL: url))
         default:
             break
         }
+
+        let isXDV = (ext == "xdv")
 
         do {
             let document = try DVIParser(url: url).parse()
@@ -42,7 +46,7 @@ enum DVIDocumentLoader {
             let nativeMessage = error.localizedDescription
 
             do {
-                let conversion = try DVIToPDFConverter.convert(dviURL: url)
+                let conversion = try DVIToPDFConverter.convert(dviURL: url, preferXDV: isXDV)
                 return .pdf(conversion)
             } catch {
                 throw DVIDocumentLoadError(
@@ -55,48 +59,59 @@ enum DVIDocumentLoader {
 }
 
 enum DVIToPDFConverter {
-    static func convert(dviURL: URL) throws -> PDFConversion {
-        guard let executable = findExecutable(named: "dvipdfmx") else {
-            throw ConverterError.notFound("dvipdfmx")
+    static func convert(dviURL: URL, preferXDV: Bool = false) throws -> PDFConversion {
+        let converterNames = preferXDV ? ["xdvipdfmx", "dvipdfmx"] : ["dvipdfmx"]
+        var lastError: Error?
+
+        for converterName in converterNames {
+            guard let executable = findExecutable(named: converterName) else {
+                lastError = ConverterError.notFound(converterName)
+                continue
+            }
+
+            let temporaryDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                .appendingPathComponent("macDVI-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+            let outputURL = temporaryDirectory
+                .appendingPathComponent(dviURL.deletingPathExtension().lastPathComponent)
+                .appendingPathExtension("pdf")
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = ["-o", outputURL.path, dviURL.path]
+            process.currentDirectoryURL = dviURL.deletingLastPathComponent()
+
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
+            process.standardOutput = outputPipe
+            process.standardError = errorPipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+            } catch {
+                lastError = ConverterError.launchFailed(converterName, error.localizedDescription)
+                continue
+            }
+
+            let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let errorOutput = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let log = [output, errorOutput].filter { !$0.isEmpty }.joined(separator: "\n")
+
+            guard process.terminationStatus == 0 else {
+                lastError = ConverterError.failed(converterName, log.isEmpty ? "exit code \(process.terminationStatus)" : log)
+                continue
+            }
+
+            guard FileManager.default.fileExists(atPath: outputURL.path) else {
+                lastError = ConverterError.failed(converterName, "converter completed but did not produce a PDF")
+                continue
+            }
+
+            return PDFConversion(pdfURL: outputURL, converterName: converterName, log: log)
         }
 
-        let temporaryDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("macDVI-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
-        let outputURL = temporaryDirectory
-            .appendingPathComponent(dviURL.deletingPathExtension().lastPathComponent)
-            .appendingPathExtension("pdf")
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = ["-o", outputURL.path, dviURL.path]
-        process.currentDirectoryURL = dviURL.deletingLastPathComponent()
-
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            throw ConverterError.launchFailed(executable, error.localizedDescription)
-        }
-
-        let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let errorOutput = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let log = [output, errorOutput].filter { !$0.isEmpty }.joined(separator: "\n")
-
-        guard process.terminationStatus == 0 else {
-            throw ConverterError.failed("dvipdfmx", log.isEmpty ? "exit code \(process.terminationStatus)" : log)
-        }
-
-        guard FileManager.default.fileExists(atPath: outputURL.path) else {
-            throw ConverterError.failed("dvipdfmx", "converter completed but did not produce a PDF")
-        }
-
-        return PDFConversion(pdfURL: outputURL, converterName: "dvipdfmx", log: log)
+        throw lastError ?? ConverterError.notFound(converterNames.first ?? "dvipdfmx")
     }
 
     private static func findExecutable(named name: String) -> String? {

@@ -44,7 +44,7 @@ final class DocumentWindowController: NSWindowController {
 
     @objc func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = ["dvi", "ps", "eps"].compactMap {
+        panel.allowedContentTypes = ["dvi", "xdv", "ps", "eps"].compactMap {
             UTType(filenameExtension: $0)
         }
         panel.allowsMultipleSelection = false
@@ -126,7 +126,7 @@ final class DocumentWindowController: NSWindowController {
     }
 
     private func showPlaceholder() {
-        let label = NSTextField(labelWithString: "Open a DVI or PostScript file")
+        let label = NSTextField(labelWithString: "Open a DVI, XDV, or PostScript file")
         label.font = NSFont.systemFont(ofSize: 18, weight: .medium)
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -290,7 +290,7 @@ extension DocumentWindowController: NSToolbarDelegate {
         case .openDocument:
             item.label = "Open"
             item.paletteLabel = "Open Document"
-            item.toolTip = "Open a DVI or PostScript file"
+            item.toolTip = "Open a DVI, XDV, or PostScript file"
             item.image = NSImage(systemSymbolName: "doc.badge.plus", accessibilityDescription: "Open")
             item.action = #selector(openDocument(_:))
         case .zoomOut:
