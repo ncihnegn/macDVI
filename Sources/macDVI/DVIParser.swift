@@ -17,7 +17,6 @@ final class DVIParser {
     private var nextSyntheticFontNumber: Int = 1_000_000
     private var virtualFontExpansionDepth = 0
     private let maxVirtualFontExpansionDepth = 16
-    private var warnedXDVNative = false
 
     init(url: URL) throws {
         self.url = url
@@ -99,13 +98,15 @@ final class DVIParser {
             case 250...251:
                 continue
             case 252:
-                try skipXDVGlyphString(reader: &reader)
+                let nativeDef = try readXDVDefineNativeFont(reader: &reader)
+                fonts[nativeDef.number] = nativeDef
             case 253:
                 try skipXDVGlyphArray(reader: &reader)
             case 254:
                 try skipXDVPicFile(reader: &reader)
             case 255:
-                try skipXDVDefineNativeFont(reader: &reader)
+                let nativeDef = try readXDVDefineNativeFont(reader: &reader)
+                fonts[nativeDef.number] = nativeDef
             default:
                 throw DVIError.unsupportedOpcode(opcode, offset: opcodeOffset)
             }
@@ -224,16 +225,15 @@ final class DVIParser {
             case 250...251:
                 continue
             case 252:
-                try skipXDVGlyphString(reader: &reader)
-                warnXDVNativeOnce()
+                let nativeDef = try readXDVDefineNativeFont(reader: &reader)
+                fonts[nativeDef.number] = nativeDef
             case 253:
-                try skipXDVGlyphArray(reader: &reader)
-                warnXDVNativeOnce()
+                try parseXDVGlyphArray(reader: &reader, state: &state, page: &currentPage, pointsPerDVIUnit: pointsPerDVIUnit)
             case 254:
-                try skipXDVPicFile(reader: &reader)
-                warnXDVNativeOnce()
+                try parseXDVPicFile(reader: &reader, state: &state, page: &currentPage, pointsPerDVIUnit: pointsPerDVIUnit)
             case 255:
-                try skipXDVDefineNativeFont(reader: &reader)
+                let nativeDef = try readXDVDefineNativeFont(reader: &reader)
+                fonts[nativeDef.number] = nativeDef
             default:
                 throw DVIError.unsupportedOpcode(opcode, offset: opcodeOffset)
             }
@@ -654,19 +654,74 @@ final class DVIParser {
 
     // MARK: - XDV opcode helpers
 
-    /// Opcode 252: XDV_GLYPH_STRING — 4 bytes width + 2 bytes glyph count (n) + n×2 bytes glyph IDs
-    private func skipXDVGlyphString(reader: inout DVIByteReader) throws {
-        try reader.skip(4) // width (Fixed 26.6)
+    /// Opcode 253: XDV_GLYPH_ARRAY — 4 bytes width + 2 bytes glyph count (n) + n×(4+4) bytes positions + n×2 bytes glyph IDs
+    private func skipXDVGlyphArray(reader: inout DVIByteReader) throws {
+        try reader.skip(4) // width (Fixed 26.6 / DVI units)
         let glyphCount = Int(try reader.readUnsigned(2))
+        try reader.skip(glyphCount * 8) // x,y position pairs (each 4 bytes Fixed 26.6 / DVI units)
         try reader.skip(glyphCount * 2) // glyph IDs
     }
 
-    /// Opcode 253: XDV_GLYPH_ARRAY — 4 bytes width + 2 bytes glyph count (n) + n×(4+4) bytes positions + n×2 bytes glyph IDs
-    private func skipXDVGlyphArray(reader: inout DVIByteReader) throws {
-        try reader.skip(4) // width (Fixed 26.6)
+    /// Opcode 253: parse and place native glyph array
+    private func parseXDVGlyphArray(
+        reader: inout DVIByteReader,
+        state: inout DVIState,
+        page: inout PageBuilder?,
+        pointsPerDVIUnit: Double
+    ) throws {
+        let widthDVI = try reader.readSigned(4)
         let glyphCount = Int(try reader.readUnsigned(2))
-        try reader.skip(glyphCount * 8) // x,y position pairs (each 4 bytes Fixed 26.6)
-        try reader.skip(glyphCount * 2) // glyph IDs
+        guard glyphCount > 0 else { return }
+
+        var positions: [(x: Int64, y: Int64)] = []
+        positions.reserveCapacity(glyphCount)
+        for _ in 0..<glyphCount {
+            let x = try reader.readSigned(4)
+            let y = try reader.readSigned(4)
+            positions.append((x: x, y: y))
+        }
+
+        var glyphIDs: [UInt16] = []
+        glyphIDs.reserveCapacity(glyphCount)
+        for _ in 0..<glyphCount {
+            let gid = UInt16(try reader.readUnsigned(2))
+            glyphIDs.append(gid)
+        }
+
+        guard let fontNumber = state.currentFontNumber else {
+            warnings.append("XDV glyph array appeared before a font was selected.")
+            state.h += widthDVI
+            return
+        }
+
+        let fontDef = fonts[fontNumber]
+        let fontSize = fontSizePoints(fontNumber: fontNumber, pointsPerDVIUnit: pointsPerDVIUnit)
+        let color = fontDef?.nativeColor ?? state.currentColor
+
+        var placedGlyphs: [DVINativeGlyphPosition] = []
+        placedGlyphs.reserveCapacity(glyphCount)
+        for i in 0..<glyphCount {
+            let pos = positions[i]
+            let gid = glyphIDs[i]
+            let gx = Double(pos.x) * pointsPerDVIUnit
+            let gy = Double(pos.y) * pointsPerDVIUnit
+            placedGlyphs.append(DVINativeGlyphPosition(x: gx, y: gy, glyphID: gid))
+        }
+
+        if page != nil {
+            let arrayItem = DVINativeGlyphArray(
+                fontNumber: fontNumber,
+                width: Double(widthDVI) * pointsPerDVIUnit,
+                glyphs: placedGlyphs,
+                x: xPoint(state.h, pointsPerDVIUnit),
+                baselineY: yPoint(state.v, pointsPerDVIUnit),
+                fontSize: fontSize,
+                color: color
+            )
+            page?.add(.nativeGlyphArray(arrayItem))
+        }
+
+        state.h += widthDVI
     }
 
     /// Opcode 254: XDV_PIC_FILE — 1 byte flags + 24 bytes transform + 2 bytes page + 1 byte path length + path
@@ -678,15 +733,62 @@ final class DVIParser {
         try reader.skip(pathLength) // file path
     }
 
-    /// Opcode 255: XDV_DEFINE_NATIVE_FONT — 4 bytes font number + 4 bytes size + 2 bytes flags +
+    private func parseXDVPicFile(
+        reader: inout DVIByteReader,
+        state: inout DVIState,
+        page: inout PageBuilder?,
+        pointsPerDVIUnit: Double
+    ) throws {
+        let flags = try reader.readByte()
+        var matrix: [Double] = []
+        matrix.reserveCapacity(6)
+        for _ in 0..<6 {
+            let fixedVal = try reader.readSigned(4)
+            matrix.append(Double(fixedVal) / 65536.0)
+        }
+        let pageNumber = Int(try reader.readUnsigned(2))
+        let pathLength = Int(try reader.readUnsigned(1))
+        let pathBytes = try reader.readBytes(pathLength)
+        let filePath = String(data: pathBytes, encoding: .utf8)
+            ?? String(data: pathBytes, encoding: .ascii)
+            ?? ""
+
+        if page != nil {
+            let picItem = XDVPicItem(
+                flags: flags,
+                transform: matrix,
+                pageNumber: pageNumber,
+                path: filePath,
+                x: xPoint(state.h, pointsPerDVIUnit),
+                y: yPoint(state.v, pointsPerDVIUnit)
+            )
+            page?.add(.pic(picItem))
+        }
+    }
+
+    /// Opcode 252 & 255: XDV_DEFINE_NATIVE_FONT — 4 bytes font number + 4 bytes size + 2 bytes flags +
     /// 1 byte psName length (l) + l bytes + 4 bytes rgba color + optional flag-dependent data
-    private func skipXDVDefineNativeFont(reader: inout DVIByteReader) throws {
-        try reader.skip(4) // font number
-        try reader.skip(4) // size (Fixed 16.16)
-        let flags = try reader.readUnsigned(2)
+    private func readXDVDefineNativeFont(reader: inout DVIByteReader) throws -> DVIFontDefinition {
+        let fontNumber = Int(try reader.readSigned(4))
+        let scaledSize = Int64(try reader.readSigned(4)) // Fixed 16.16 point size in DVI units
+        let flags = UInt16(try reader.readUnsigned(2))
         let psNameLength = Int(try reader.readUnsigned(1))
-        try reader.skip(psNameLength) // PostScript font name
-        try reader.skip(4) // RGBA color
+        let psNameBytes = try reader.readBytes(psNameLength)
+        let fontName = String(data: psNameBytes, encoding: .utf8)
+            ?? String(data: psNameBytes, encoding: .ascii)
+            ?? ""
+        _ = try reader.readUnsigned(4) // font index / order
+
+        var nativeColor: DVIColor?
+        let hasColored = (flags & 0x0200) != 0
+        if hasColored {
+            let rgba = try reader.readUnsigned(4)
+            let r = Double((rgba >> 24) & 0xFF) / 255.0
+            let g = Double((rgba >> 16) & 0xFF) / 255.0
+            let b = Double((rgba >> 8) & 0xFF) / 255.0
+            let a = Double(rgba & 0xFF) / 255.0
+            nativeColor = DVIColor(red: r, green: g, blue: b, alpha: a)
+        }
 
         let hasVariations = (flags & 0x0800) != 0
         if hasVariations {
@@ -694,26 +796,41 @@ final class DVIParser {
             try reader.skip(variationCount * 8) // axis + value pairs
         }
 
+        var nativeExtend: Double?
         let hasExtend = (flags & 0x1000) != 0
         if hasExtend {
-            try reader.skip(4) // extend value
+            let rawExtend = try reader.readSigned(4)
+            nativeExtend = Double(rawExtend) / 65536.0
         }
 
+        var nativeSlant: Double?
         let hasSlant = (flags & 0x2000) != 0
         if hasSlant {
-            try reader.skip(4) // slant value
+            let rawSlant = try reader.readSigned(4)
+            nativeSlant = Double(rawSlant) / 65536.0
         }
 
+        var nativeEmbolden: Double?
         let hasEmbolden = (flags & 0x4000) != 0
         if hasEmbolden {
-            try reader.skip(4) // embolden value
+            let rawEmbolden = try reader.readSigned(4)
+            nativeEmbolden = Double(rawEmbolden) / 65536.0
         }
-    }
 
-    private func warnXDVNativeOnce() {
-        guard !warnedXDVNative else { return }
-        warnedXDVNative = true
-        warnings.append("This XDV file contains native font glyphs that cannot be rendered by the native renderer. Some content may be missing.")
+        return DVIFontDefinition(
+            number: fontNumber,
+            checksum: 0,
+            scaledSize: scaledSize,
+            designSize: scaledSize,
+            area: "",
+            name: fontName,
+            isNative: true,
+            nativeFlags: flags,
+            nativeColor: nativeColor,
+            nativeExtend: nativeExtend,
+            nativeSlant: nativeSlant,
+            nativeEmbolden: nativeEmbolden
+        )
     }
 }
 
@@ -744,6 +861,11 @@ private struct PageBuilder {
     let counters: [Int64]
     private(set) var items: [DVIPageItem] = []
 
+    init(number: Int, counters: [Int64]) {
+        self.number = number
+        self.counters = counters
+    }
+
     mutating func add(_ item: DVIPageItem) {
         items.append(item)
     }
@@ -761,6 +883,12 @@ private struct PageBuilder {
             case .glyph(let glyph):
                 maxX = max(maxX, glyph.x + glyph.advance + glyph.italicCorrection + 72)
                 maxY = max(maxY, glyph.baselineY + glyph.depth + 72)
+            case .nativeGlyphArray(let array):
+                maxX = max(maxX, array.x + array.width + 72)
+                maxY = max(maxY, array.baselineY + array.fontSize + 72)
+            case .pic(let pic):
+                maxX = max(maxX, pic.x + 72)
+                maxY = max(maxY, pic.y + 72)
             case .rule(let rule):
                 maxX = max(maxX, rule.x + rule.width + 72)
                 maxY = max(maxY, rule.y + rule.height + 72)

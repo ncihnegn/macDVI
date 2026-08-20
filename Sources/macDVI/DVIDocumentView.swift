@@ -90,10 +90,114 @@ final class DVIDocumentView: NSView {
             switch item {
             case .glyph(let glyph):
                 draw(glyph: glyph, in: pageRect, document: document)
+            case .nativeGlyphArray(let glyphArray):
+                draw(nativeGlyphArray: glyphArray, in: pageRect, document: document)
+            case .pic(let pic):
+                draw(pic: pic, in: pageRect, document: document)
             case .rule(let rule):
                 draw(rule: rule, in: pageRect)
             case .special:
                 continue
+            }
+        }
+
+        context.restoreGState()
+    }
+
+    private func draw(pic: XDVPicItem, in pageRect: NSRect, document: DVIDocument) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+
+        var fileURL: URL?
+        if pic.path.hasPrefix("/") {
+            fileURL = URL(fileURLWithPath: pic.path)
+        } else {
+            let docDir = document.url.deletingLastPathComponent()
+            let candidate = docDir.appendingPathComponent(pic.path)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                fileURL = candidate
+            } else if let found = TeXFileLocator.findFile(named: pic.path) {
+                fileURL = URL(fileURLWithPath: found)
+            }
+        }
+
+        guard let resolvedURL = fileURL, FileManager.default.fileExists(atPath: resolvedURL.path) else {
+            return
+        }
+
+        let ext = resolvedURL.pathExtension.lowercased()
+        let x = pageRect.minX + CGFloat(pic.x) * zoom
+        let y = pageRect.minY + CGFloat(pic.y) * zoom
+
+        context.saveGState()
+        defer { context.restoreGState() }
+
+        context.translateBy(x: x, y: y)
+
+        if pic.transform.count == 6 {
+            let t = pic.transform
+            let matrix = CGAffineTransform(
+                a: CGFloat(t[0]) * zoom,
+                b: CGFloat(t[1]) * zoom,
+                c: CGFloat(t[2]) * zoom,
+                d: CGFloat(t[3]) * zoom,
+                tx: CGFloat(t[4]) * zoom,
+                ty: CGFloat(t[5]) * zoom
+            )
+            context.concatenate(matrix)
+        }
+
+        if ext == "pdf", let pdfDoc = CGPDFDocument(resolvedURL as CFURL), let pdfPage = pdfDoc.page(at: max(pic.pageNumber, 1)) {
+            let box = pdfPage.getBoxRect(.mediaBox)
+            context.saveGState()
+            context.scaleBy(x: 1, y: -1)
+            context.translateBy(x: 0, y: -box.height)
+            context.drawPDFPage(pdfPage)
+            context.restoreGState()
+        } else if let image = NSImage(contentsOf: resolvedURL),
+                  let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            let width = CGFloat(cgImage.width)
+            let height = CGFloat(cgImage.height)
+            let imageRect = CGRect(x: 0, y: 0, width: width, height: height)
+            context.saveGState()
+            context.scaleBy(x: 1, y: -1)
+            context.translateBy(x: 0, y: -height)
+            context.draw(cgImage, in: imageRect)
+            context.restoreGState()
+        }
+    }
+
+    private func draw(nativeGlyphArray: DVINativeGlyphArray, in pageRect: NSRect, document: DVIDocument) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let definition = document.fonts[nativeGlyphArray.fontNumber]
+        let outlineFont = definition.flatMap { type1FontProvider?.font(for: $0) }
+
+        let baseX = pageRect.minX + CGFloat(nativeGlyphArray.x) * zoom
+        let baseY = pageRect.minY + CGFloat(nativeGlyphArray.baselineY) * zoom
+        let fontSize = max(CGFloat(nativeGlyphArray.fontSize) * zoom, 1)
+
+        let extend = CGFloat(definition?.nativeExtend ?? 1.0)
+        let slant = CGFloat(definition?.nativeSlant ?? 0.0)
+
+        context.saveGState()
+        context.setFillColor(NSColor(dviColor: nativeGlyphArray.color).cgColor)
+
+        for pos in nativeGlyphArray.glyphs {
+            let gx = baseX + CGFloat(pos.x) * zoom
+            let gy = baseY + CGFloat(pos.y) * zoom
+
+            if let outlineFont, let path = outlineFont.path(forGlyphID: CGGlyph(pos.glyphID)) {
+                let scale = max(fontSize / CGFloat(outlineFont.unitsPerEm), 0.001)
+                context.saveGState()
+                context.translateBy(x: gx, y: gy)
+                var transform = CGAffineTransform.identity
+                transform = transform.scaledBy(x: scale * extend, y: -scale)
+                if slant != 0 {
+                    transform = transform.concatenating(CGAffineTransform(1, 0, -slant, 1, 0, 0))
+                }
+                context.concatenate(transform)
+                context.addPath(path)
+                context.fillPath()
+                context.restoreGState()
             }
         }
 

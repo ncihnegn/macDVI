@@ -22,6 +22,40 @@ struct DVIFontDefinition: Hashable {
     let designSize: Int64
     let area: String
     let name: String
+    let isNative: Bool
+    let nativeFlags: UInt16
+    let nativeColor: DVIColor?
+    let nativeExtend: Double?
+    let nativeSlant: Double?
+    let nativeEmbolden: Double?
+
+    init(
+        number: Int,
+        checksum: UInt32,
+        scaledSize: Int64,
+        designSize: Int64,
+        area: String,
+        name: String,
+        isNative: Bool = false,
+        nativeFlags: UInt16 = 0,
+        nativeColor: DVIColor? = nil,
+        nativeExtend: Double? = nil,
+        nativeSlant: Double? = nil,
+        nativeEmbolden: Double? = nil
+    ) {
+        self.number = number
+        self.checksum = checksum
+        self.scaledSize = scaledSize
+        self.designSize = designSize
+        self.area = area
+        self.name = name
+        self.isNative = isNative
+        self.nativeFlags = nativeFlags
+        self.nativeColor = nativeColor
+        self.nativeExtend = nativeExtend
+        self.nativeSlant = nativeSlant
+        self.nativeEmbolden = nativeEmbolden
+    }
 
     var texName: String {
         if area.isEmpty {
@@ -48,8 +82,35 @@ struct DVIPage {
 
 enum DVIPageItem {
     case glyph(DVIGlyph)
+    case nativeGlyphArray(DVINativeGlyphArray)
+    case pic(XDVPicItem)
     case rule(DVIRule)
     case special(DVISpecial)
+}
+
+struct XDVPicItem {
+    let flags: UInt8
+    let transform: [Double] // 6 elements: a, b, c, d, tx, ty
+    let pageNumber: Int
+    let path: String
+    let x: Double
+    let y: Double
+}
+
+struct DVINativeGlyphPosition: Hashable {
+    let x: Double
+    let y: Double
+    let glyphID: UInt16
+}
+
+struct DVINativeGlyphArray {
+    let fontNumber: Int
+    let width: Double
+    let glyphs: [DVINativeGlyphPosition]
+    let x: Double
+    let baselineY: Double
+    let fontSize: Double
+    let color: DVIColor
 }
 
 struct DVIGlyph {

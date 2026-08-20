@@ -35,6 +35,37 @@ final class OutlineFont {
         kind = (ext == "pfb" || ext == "pfa") ? .type1 : .openType
     }
 
+    init(postScriptName: String) throws {
+        let attributes: [CFString: Any] = [
+            kCTFontNameAttribute: postScriptName as CFString
+        ]
+        let descriptor = CTFontDescriptorCreateWithAttributes(attributes as CFDictionary)
+        let ct = CTFontCreateWithFontDescriptor(descriptor, 1000, nil)
+        ctFont = ct
+        let cg = CTFontCopyGraphicsFont(ct, nil)
+        cgFont = cg
+        unitsPerEm = cg.unitsPerEm > 0 ? Double(cg.unitsPerEm) : Double(CTFontGetUnitsPerEm(ct))
+        self.postScriptName = postScriptName
+        kind = .openType
+    }
+
+    func path(forGlyphID glyphID: CGGlyph) -> CGPath? {
+        let key = PathCacheKey.glyphID(glyphID)
+        if let cached = pathCache[key] { return cached }
+        if missingGlyphs.contains(key) { return nil }
+
+        guard glyphID != 0 else {
+            missingGlyphs.insert(key)
+            return nil
+        }
+        guard let path = CTFontCreatePathForGlyph(ctFont, glyphID, nil) else {
+            missingGlyphs.insert(key)
+            return nil
+        }
+        pathCache[key] = path
+        return path
+    }
+
     func path(forGlyphNamed name: String) -> CGPath? {
         let key = PathCacheKey.name(name)
         if let cached = pathCache[key] { return cached }
@@ -82,6 +113,7 @@ final class OutlineFont {
     private enum PathCacheKey: Hashable {
         case name(String)
         case unicode(UInt32)
+        case glyphID(CGGlyph)
     }
 }
 
@@ -107,13 +139,23 @@ final class OutlineFontProvider {
             return nil
         }
 
-        guard let url = fontURL(for: definition),
-              let font = try? OutlineFont(url: url) else {
-            missingFonts.insert(key)
-            return nil
+        if let url = fontURL(for: definition),
+           let font = try? OutlineFont(url: url) {
+            cache[key] = font
+            return font
         }
-        cache[key] = font
-        return font
+
+        if definition.isNative {
+            // Try loading by PostScript or Family name via CoreText
+            let cleanName = definition.name.components(separatedBy: "/").first ?? definition.name
+            if let font = try? OutlineFont(postScriptName: cleanName) {
+                cache[key] = font
+                return font
+            }
+        }
+
+        missingFonts.insert(key)
+        return nil
     }
 
     private func fontURL(for definition: DVIFontDefinition) -> URL? {
