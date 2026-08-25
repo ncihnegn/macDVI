@@ -2,7 +2,9 @@
 
 An AppKit DVI viewer for macOS.
 
-The viewer opens `.dvi`, `.ps`, and `.eps` files in a native macOS window. It renders DVI files directly with a built-in parser and AppKit renderer that handles pages, positioning, text, rules, zooming, TeX font metrics, Type 1 outline fonts, PK and GF bitmap fonts, virtual fonts (`.vf`), full Computer Modern glyph mapping (OT1, OT1tt, OML, OMS, OMX, MSAM, MSBM, and T1 / Cork encodings), page-size specials, and common color specials. PostScript and EPS files are converted to PDF with Ghostscript and displayed with PDFKit. If the native parser cannot read a DVI file, the app can still fall back to `dvipdfmx` and PDFKit when a TeX converter is installed.
+The viewer opens `.dvi`, `.xdv`, `.ps`, and `.eps` files in a native macOS window. It renders DVI and PostScript files directly with built-in native parsers and AppKit renderers:
+- **DVI/XDV Engine**: Handles pages, positioning, text, rules, zooming, TeX font metrics, Type 1 outline fonts, PK and GF bitmap fonts, virtual fonts (`.vf`), full Computer Modern glyph mapping (OT1, OT1tt, OML, OMS, OMX, MSAM, MSBM, and T1 / Cork encodings), page-size specials, and common color specials.
+- **Native PostScript Engine**: Integrates the native Rust `postscript` virtual machine and vector engine via C-FFI to parse DSC conventions, decode embedded Type 1 fonts (`eexec` and CharStrings), evaluate PostScript drawing routines, and render pages natively in AppKit with interactive zooming. If a PostScript file cannot be parsed natively, the app falls back to Ghostscript (`gs`) and PDFKit.
 
 ## Build and Run
 

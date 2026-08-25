@@ -1,0 +1,4 @@
+module CPostScript [system] {
+    header "postscript.h"
+    export *
+}

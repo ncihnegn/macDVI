@@ -889,6 +889,9 @@ private struct PageBuilder {
             case .pic(let pic):
                 maxX = max(maxX, pic.x + 72)
                 maxY = max(maxY, pic.y + 72)
+            case .postScriptPage(let ps):
+                maxX = max(maxX, ps.width)
+                maxY = max(maxY, ps.height)
             case .rule(let rule):
                 maxX = max(maxX, rule.x + rule.width + 72)
                 maxY = max(maxY, rule.y + rule.height + 72)

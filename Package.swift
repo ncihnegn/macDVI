@@ -11,6 +11,20 @@ let package = Package(
         .executable(name: "macDVI", targets: ["macDVI"])
     ],
     targets: [
-        .executableTarget(name: "macDVI")
+        .target(
+            name: "CPostScript",
+            dependencies: [],
+            path: "Sources/CPostScript"
+        ),
+        .executableTarget(
+            name: "macDVI",
+            dependencies: ["CPostScript"],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L/Users/ningchen/Temp/postscript/target/release",
+                    "-lpostscript"
+                ])
+            ]
+        )
     ]
 )

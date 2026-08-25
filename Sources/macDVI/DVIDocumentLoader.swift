@@ -32,7 +32,21 @@ enum DVIDocumentLoader {
 
         switch ext {
         case "ps", "eps":
-            return .pdf(try PostScriptToPDFConverter.convert(postScriptURL: url))
+            do {
+                let document = try NativePostScriptLoader.load(url: url)
+                return .native(document)
+            } catch {
+                let nativeMessage = error.localizedDescription
+                do {
+                    let conversion = try PostScriptToPDFConverter.convert(postScriptURL: url)
+                    return .pdf(conversion)
+                } catch {
+                    throw DVIDocumentLoadError(
+                        nativeMessage: nativeMessage,
+                        conversionMessage: error.localizedDescription
+                    )
+                }
+            }
         default:
             break
         }

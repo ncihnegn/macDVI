@@ -94,6 +94,8 @@ final class DVIDocumentView: NSView {
                 draw(nativeGlyphArray: glyphArray, in: pageRect, document: document)
             case .pic(let pic):
                 draw(pic: pic, in: pageRect, document: document)
+            case .postScriptPage(let psPage):
+                draw(postScriptPage: psPage, in: pageRect, document: document)
             case .rule(let rule):
                 draw(rule: rule, in: pageRect)
             case .special:
@@ -102,6 +104,26 @@ final class DVIDocumentView: NSView {
         }
 
         context.restoreGState()
+    }
+
+    private func draw(postScriptPage: PostScriptPageItem, in pageRect: NSRect, document: DVIDocument) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let scale = max(window?.backingScaleFactor ?? 2.0, 1.0)
+        let pixelWidth = UInt32(max(pageRect.width * scale, 1))
+        let pixelHeight = UInt32(max(pageRect.height * scale, 1))
+
+        if let cgImage = NativePostScriptRenderer.shared.renderPage(
+            url: postScriptPage.postScriptURL,
+            pageIndex: postScriptPage.pageIndex,
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight
+        ) {
+            context.saveGState()
+            context.translateBy(x: pageRect.minX, y: pageRect.maxY)
+            context.scaleBy(x: 1, y: -1)
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: pageRect.width, height: pageRect.height))
+            context.restoreGState()
+        }
     }
 
     private func draw(pic: XDVPicItem, in pageRect: NSRect, document: DVIDocument) {
@@ -152,6 +174,21 @@ final class DVIDocumentView: NSView {
             context.scaleBy(x: 1, y: -1)
             context.translateBy(x: 0, y: -box.height)
             context.drawPDFPage(pdfPage)
+            context.restoreGState()
+        } else if (ext == "ps" || ext == "eps"),
+                  let cgImage = NativePostScriptRenderer.shared.renderPage(
+                      url: resolvedURL,
+                      pageIndex: max(pic.pageNumber - 1, 0),
+                      pixelWidth: 800,
+                      pixelHeight: 800
+                  ) {
+            let width = CGFloat(cgImage.width)
+            let height = CGFloat(cgImage.height)
+            let imageRect = CGRect(x: 0, y: 0, width: width, height: height)
+            context.saveGState()
+            context.scaleBy(x: 1, y: -1)
+            context.translateBy(x: 0, y: -height)
+            context.draw(cgImage, in: imageRect)
             context.restoreGState()
         } else if let image = NSImage(contentsOf: resolvedURL),
                   let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {

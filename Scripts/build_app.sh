@@ -8,6 +8,9 @@ MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 
 cd "$ROOT"
+if [ -d "$ROOT/../postscript" ]; then
+    (cd "$ROOT/../postscript" && cargo build --release)
+fi
 swift build -c release
 
 rm -rf "$APP"
