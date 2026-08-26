@@ -192,7 +192,7 @@ final class DVIParser {
             case 166:
                 state.v += state.z
             case 167...170:
-                let value = try reader.readSigned(Int(opcode - 165))
+                let value = try reader.readSigned(Int(opcode - 166))
                 state.z = value
                 state.v += value
             case 171...234:
@@ -407,7 +407,7 @@ final class DVIParser {
             case 166:
                 state.v += state.z
             case 167...170:
-                let value = try reader.readSigned(Int(opcode - 165))
+                let value = try reader.readSigned(Int(opcode - 166))
                 state.z = value
                 state.v += value
             case 171...234:
