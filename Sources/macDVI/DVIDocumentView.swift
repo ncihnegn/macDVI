@@ -4,6 +4,7 @@ final class DVIDocumentView: NSView {
     var document: DVIDocument? {
         didSet {
             fontCache.removeAll()
+            pageRenderCache.removeAllObjects()
             if let document {
                 type1FontProvider = Type1FontProvider(documentURL: document.url)
                 pkFontProvider = PKFontProvider(documentURL: document.url)
@@ -22,6 +23,7 @@ final class DVIDocumentView: NSView {
         didSet {
             zoom = min(max(zoom, 0.25), 5.0)
             fontCache.removeAll()
+            pageRenderCache.removeAllObjects()
             updateFrameSize()
             needsDisplay = true
         }
@@ -34,6 +36,7 @@ final class DVIDocumentView: NSView {
     private let pageGap: CGFloat = 28
     private let pageInset: CGFloat = 36
     private var fontCache: [FontCacheKey: NSFont] = [:]
+    private let pageRenderCache = NSCache<NSString, NSImage>()
     private var type1FontProvider: Type1FontProvider?
     private var pkFontProvider: PKFontProvider?
     private var gfFontProvider: GFFontProvider?
@@ -63,8 +66,27 @@ final class DVIDocumentView: NSView {
             let pageRect = rectForPage(at: index, page: page)
             guard pageRect.intersects(dirtyRect) else { continue }
             drawPageBackground(in: pageRect)
-            draw(page: page, in: pageRect, document: document)
+            let img = pageImage(at: index, page: page, in: pageRect, document: document)
+            img.draw(in: pageRect)
         }
+    }
+
+    private func pageImage(at index: Int, page: DVIPage, in pageRect: NSRect, document: DVIDocument) -> NSImage {
+        let cacheKey = "\(document.url.path):\(index):\(Int(zoom * 1000))" as NSString
+        if let cached = pageRenderCache.object(forKey: cacheKey) {
+            return cached
+        }
+
+        let image = NSImage(size: pageRect.size, flipped: true) { [weak self] bounds in
+            guard let self else { return false }
+            NSColor.white.setFill()
+            bounds.fill()
+            self.draw(page: page, in: bounds, document: document)
+            return true
+        }
+
+        pageRenderCache.setObject(image, forKey: cacheKey)
+        return image
     }
 
     private func drawPageBackground(in pageRect: NSRect) {

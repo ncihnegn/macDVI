@@ -236,7 +236,17 @@ private struct FontMapEntry {
 }
 
 private enum FontMapLoader {
+    private static var cachedEntries: [String: FontMapEntry]?
+    private static let lock = NSLock()
+
     static func loadEntries() -> [String: FontMapEntry] {
+        lock.lock()
+        if let cachedEntries {
+            lock.unlock()
+            return cachedEntries
+        }
+        lock.unlock()
+
         var entries: [String: FontMapEntry] = [:]
         for mapName in ["pdftex.map", "psfonts.map"] {
             guard let path = TeXFileLocator.findFile(named: mapName),
@@ -248,6 +258,10 @@ private enum FontMapLoader {
                 entries[entry.key] = entry.value
             }
         }
+
+        lock.lock()
+        cachedEntries = entries
+        lock.unlock()
         return entries
     }
 
