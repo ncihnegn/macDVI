@@ -228,9 +228,13 @@ final class OutlineFontProvider {
         }
         return mapEntries?[fontName.lowercased()]
     }
+
+    static func sharedMapEntries() -> [String: FontMapEntry] {
+        FontMapLoader.loadEntries()
+    }
 }
 
-private struct FontMapEntry {
+struct FontMapEntry {
     let postScriptName: String
     let fileName: String
 }

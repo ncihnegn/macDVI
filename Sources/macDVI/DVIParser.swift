@@ -33,8 +33,30 @@ final class DVIParser {
         guard let preamble else {
             throw DVIError.invalidPreamble
         }
+        prefetchFontFiles()
         let pages = try parsePages(preamble: preamble)
         return DVIDocument(url: url, preamble: preamble, fonts: fonts, pages: pages, warnings: warnings)
+    }
+
+    private func prefetchFontFiles() {
+        TeXFileLocator.prefetchFiles(named: ["pdftex.map", "psfonts.map"])
+        let mapEntries = OutlineFontProvider.sharedMapEntries()
+        var namesToPrefetch: [String] = []
+        for def in fonts.values {
+            let base = def.name
+            let lower = base.lowercased()
+            namesToPrefetch.append("\(base).tfm")
+            if !lower.hasPrefix("cm") && !lower.hasPrefix("ec") && !lower.hasPrefix("dc") {
+                namesToPrefetch.append("\(base).vf")
+            }
+            namesToPrefetch.append("\(base).pfb")
+            namesToPrefetch.append("\(base).otf")
+            namesToPrefetch.append("\(base).ttf")
+            if let entry = mapEntries[lower] {
+                namesToPrefetch.append(entry.fileName)
+            }
+        }
+        TeXFileLocator.prefetchFiles(named: namesToPrefetch)
     }
 
     private func collectPreambleAndFonts() throws {

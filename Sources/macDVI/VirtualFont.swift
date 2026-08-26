@@ -121,6 +121,13 @@ final class VirtualFontProvider {
         if missing.contains(key) {
             return nil
         }
+
+        let lower = definition.name.lowercased()
+        if lower.hasPrefix("cm") || lower.hasPrefix("ec") || lower.hasPrefix("dc") || lower.hasPrefix("tc") {
+            missing.insert(key)
+            return nil
+        }
+
         guard let url = locateVF(definition),
               let data = try? Data(contentsOf: url),
               let virtualFont = try? VirtualFont(data: data) else {
