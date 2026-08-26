@@ -28,6 +28,7 @@ enum TeXGlyphMapper {
         case omx
         case msam
         case msbm
+        case texBase1
         case t1
         case ascii
     }
@@ -54,6 +55,9 @@ enum TeXGlyphMapper {
         }
         if name.hasPrefix("msbm") {
             return .msbm
+        }
+        if name.hasSuffix("8r") {
+            return .texBase1
         }
         if name.hasPrefix("ec") || name.hasPrefix("tc")
             || name.hasPrefix("lmr") || name.hasPrefix("lmb")
@@ -89,6 +93,8 @@ enum TeXGlyphMapper {
             return msamUnicode[code]
         case .msbm:
             return msbmUnicode[code]
+        case .texBase1:
+            return printableASCII(code)
         case .t1:
             return t1Unicode[code] ?? printableASCII(code)
         case .ascii:
@@ -112,6 +118,9 @@ enum TeXGlyphMapper {
             return msamGlyphNames[code]
         case .msbm:
             return msbmGlyphNames[code]
+        case .texBase1:
+            guard code >= 0, code < texBase1GlyphNames.count else { return nil }
+            return texBase1GlyphNames[code]
         case .t1:
             return t1GlyphNames[code]
         case .ascii:
@@ -667,6 +676,38 @@ enum TeXGlyphMapper {
         248: "oslash", 249: "ugrave", 250: "uacute", 251: "ucircumflex",
         252: "udieresis", 253: "yacute", 254: "thorn", 255: "germandbls"
     ].merging(standardGlyphNames) { t1, _ in t1 }
+
+    // The Adobe font variants used by PSNFSS (for example phvb8r and
+    // ptmr8r) are encoded with TeXBase1Encoding in the TeX font map.
+    private static let texBase1GlyphNames: [String] = """
+        .notdef dotaccent fi fl fraction hungarumlaut Lslash lslash
+        ogonek ring .notdef breve minus .notdef Zcaron zcaron
+        caron dotlessi dotlessj ff ffi ffl notequal infinity
+        lessequal greaterequal partialdiff summation product pi grave quotesingle
+        space exclam quotedbl numbersign dollar percent ampersand quoteright
+        parenleft parenright asterisk plus comma hyphen period slash
+        zero one two three four five six seven eight nine colon semicolon
+        less equal greater question at A B C D E F G H I J K L M N O
+        P Q R S T U V W X Y Z bracketleft backslash bracketright asciicircum underscore
+        quoteleft a b c d e f g h i j k l m n o
+        p q r s t u v w x y z braceleft bar braceright asciitilde .notdef
+        Euro integral quotesinglbase florin quotedblbase ellipsis dagger daggerdbl
+        circumflex perthousand Scaron guilsinglleft OE Omega radical approxequal
+        .notdef .notdef .notdef quotedblleft quotedblright bullet endash emdash
+        tilde trademark scaron guilsinglright oe Delta lozenge Ydieresis
+        .notdef exclamdown cent sterling currency yen brokenbar section
+        dieresis copyright ordfeminine guillemotleft logicalnot hyphen registered macron
+        degree plusminus twosuperior threesuperior acute mu paragraph periodcentered
+        cedilla onesuperior ordmasculine guillemotright onequarter onehalf threequarters questiondown
+        Agrave Aacute Acircumflex Atilde Adieresis Aring AE Ccedilla
+        Egrave Eacute Ecircumflex Edieresis Igrave Iacute Icircumflex Idieresis
+        Eth Ntilde Ograve Oacute Ocircumflex Otilde multiply Oslash
+        Ugrave Uacute Ucircumflex Udieresis Yacute Thorn germandbls
+        agrave aacute acircumflex atilde adieresis aring ae ccedilla
+        egrave eacute ecircumflex edieresis igrave iacute icircumflex idieresis
+        eth ntilde ograve oacute ocircumflex otilde odieresis divide
+        oslash ugrave uacute ucircumflex udieresis yacute thorn ydieresis
+        """.split { $0.isWhitespace }.map(String.init)
 
     private static let uppercaseLetterNames: [Int: String] = [
         65: "A", 66: "B", 67: "C", 68: "D", 69: "E", 70: "F",

@@ -464,13 +464,10 @@ final class DVIParser {
 
         var mapping: [Int: Int] = [:]
         let outerScaled = outerFont.scaledSize
-        let vfDesign = virtualFont.designSize > 0 ? virtualFont.designSize : (1 << 20)
-
         for local in virtualFont.localFonts {
             let scaled = scaleLocalFontSize(
                 localScaled: local.scaledSize,
-                outerScaled: outerScaled,
-                vfDesignSize: vfDesign
+                outerScaled: outerScaled
             )
             let synthesizedNumber = nextSyntheticFontNumber
             nextSyntheticFontNumber += 1
@@ -492,11 +489,12 @@ final class DVIParser {
 
     private func scaleLocalFontSize(
         localScaled: Int64,
-        outerScaled: Int64,
-        vfDesignSize: Int64
+        outerScaled: Int64
     ) -> Int64 {
-        guard vfDesignSize > 0 else { return localScaled }
-        let product = Double(localScaled) * Double(outerScaled) / Double(vfDesignSize)
+        // VF local-font sizes are fixed-point scale factors relative to the
+        // outer font. They use the same 20 fractional bits as character
+        // packet widths, not the VF's design-size value.
+        let product = Double(localScaled) * Double(outerScaled) / Double(1 << 20)
         return Int64(product.rounded())
     }
 
@@ -1036,6 +1034,14 @@ private enum DVISpecialParser {
             targetHeight = naturalHeight
         }
 
+        let resolvedWidth: Double
+        if rwi == nil, hsize == nil, hscale == nil,
+           (rhi != nil || vsize != nil || vscale != nil) {
+            resolvedWidth = naturalWidth * (targetHeight / naturalHeight)
+        } else {
+            resolvedWidth = targetWidth
+        }
+
         return PostScriptGraphicItem(
             filePath: path,
             x: x,
@@ -1044,7 +1050,7 @@ private enum DVISpecialParser {
             lly: lly,
             urx: urx,
             ury: ury,
-            targetWidth: targetWidth,
+            targetWidth: resolvedWidth,
             targetHeight: targetHeight,
             hoffset: hoffset,
             voffset: voffset,

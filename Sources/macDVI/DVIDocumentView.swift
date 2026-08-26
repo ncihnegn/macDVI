@@ -156,28 +156,53 @@ final class DVIDocumentView: NSView {
         let pixelWidth = UInt32(max(renderWidth * scale * 2.0, 100))
         let pixelHeight = UInt32(max(renderHeight * scale * 2.0, 100))
 
-        if let cgImage = NativePostScriptRenderer.shared.renderPage(
-            url: resolvedURL,
-            pageIndex: 0,
-            pixelWidth: pixelWidth,
-            pixelHeight: pixelHeight
-        ) {
-            let graphicX = pageRect.minX + CGFloat(psGraphic.x + psGraphic.hoffset) * zoom
-            let graphicY = pageRect.minY + CGFloat(psGraphic.y + psGraphic.voffset) * zoom - renderHeight
-            let graphicRect = CGRect(
-                x: graphicX,
-                y: graphicY,
-                width: renderWidth,
-                height: renderHeight
-            )
+        let graphicX = pageRect.minX + CGFloat(psGraphic.x + psGraphic.hoffset) * zoom
+        let graphicY = pageRect.minY + CGFloat(psGraphic.y + psGraphic.voffset) * zoom - renderHeight
+        let graphicRect = CGRect(
+            x: graphicX,
+            y: graphicY,
+            width: renderWidth,
+            height: renderHeight
+        )
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        if psGraphic.clip {
+            context.clip(to: graphicRect)
+        }
+        context.translateBy(x: graphicRect.minX, y: graphicRect.maxY)
+        context.scaleBy(x: 1, y: -1)
+
+        let ext = resolvedURL.pathExtension.lowercased()
+        if ext == "pdf",
+           let pdfDoc = CGPDFDocument(resolvedURL as CFURL),
+           let pdfPage = pdfDoc.page(at: 1) {
+            let box = pdfPage.getBoxRect(.mediaBox)
+            guard box.width > 0, box.height > 0 else { return }
             context.saveGState()
-            if psGraphic.clip {
-                context.clip(to: graphicRect)
-            }
-            context.translateBy(x: graphicRect.minX, y: graphicRect.maxY)
-            context.scaleBy(x: 1, y: -1)
-            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: graphicRect.width, height: graphicRect.height))
+            context.scaleBy(
+                x: graphicRect.width / box.width,
+                y: graphicRect.height / box.height
+            )
+            context.drawPDFPage(pdfPage)
             context.restoreGState()
+        } else if ext == "ps" || ext == "eps",
+                  let cgImage = NativePostScriptRenderer.shared.renderPage(
+                      url: resolvedURL,
+                      pageIndex: 0,
+                      pixelWidth: pixelWidth,
+                      pixelHeight: pixelHeight
+                  ) {
+            context.draw(
+                cgImage,
+                in: CGRect(x: 0, y: 0, width: graphicRect.width, height: graphicRect.height)
+            )
+        } else if let image = NSImage(contentsOf: resolvedURL),
+                  let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            context.draw(
+                cgImage,
+                in: CGRect(x: 0, y: 0, width: graphicRect.width, height: graphicRect.height)
+            )
         }
     }
 
