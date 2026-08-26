@@ -73,6 +73,60 @@ final class DocumentWindowController: NSWindowController {
         updateStatusForCurrentDocument()
     }
 
+    override func pageDown(_ sender: Any?) {
+        if let pdfView {
+            pdfView.pageDown(sender)
+        }
+        if let dviView {
+            dviView.scrollPageDown()
+        }
+    }
+
+    override func pageUp(_ sender: Any?) {
+        if let pdfView {
+            pdfView.pageUp(sender)
+        }
+        if let dviView {
+            dviView.scrollPageUp()
+        }
+    }
+
+    @objc func nextPage(_ sender: Any?) {
+        if let pdfView {
+            pdfView.goToNextPage(sender)
+        }
+        if let dviView {
+            dviView.goToNextPage()
+        }
+    }
+
+    @objc func previousPage(_ sender: Any?) {
+        if let pdfView {
+            pdfView.goToPreviousPage(sender)
+        }
+        if let dviView {
+            dviView.goToPreviousPage()
+        }
+    }
+
+    @objc func firstPage(_ sender: Any?) {
+        if let pdfView {
+            pdfView.goToFirstPage(sender)
+        }
+        if let dviView {
+            dviView.scrollToTop()
+        }
+    }
+
+    @objc func lastPage(_ sender: Any?) {
+        if let pdfView {
+            pdfView.goToLastPage(sender)
+        }
+        if let dviView {
+            dviView.scrollToBottom()
+        }
+    }
+
     private func setupContent() {
         guard let window else { return }
         let root = NSView()
@@ -215,6 +269,7 @@ final class DocumentWindowController: NSWindowController {
 
         replaceContent(with: scrollView)
         pinToContainer(scrollView)
+        window?.makeFirstResponder(dviView)
     }
 
     private func showError(_ error: Error) {

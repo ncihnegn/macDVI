@@ -65,6 +65,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyController?.actualSize(sender)
     }
 
+    @objc func pageDown(_ sender: Any?) {
+        keyController?.pageDown(sender)
+    }
+
+    @objc func pageUp(_ sender: Any?) {
+        keyController?.pageUp(sender)
+    }
+
+    @objc func nextPage(_ sender: Any?) {
+        keyController?.nextPage(sender)
+    }
+
+    @objc func previousPage(_ sender: Any?) {
+        keyController?.previousPage(sender)
+    }
+
+    @objc func firstPage(_ sender: Any?) {
+        keyController?.firstPage(sender)
+    }
+
+    @objc func lastPage(_ sender: Any?) {
+        keyController?.lastPage(sender)
+    }
+
     private var keyController: DocumentWindowController? {
         guard let keyWindow = NSApp.keyWindow else {
             return controllers.last
@@ -117,6 +141,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewMenu.addItem(actualSizeItem)
         viewItem.submenu = viewMenu
         mainMenu.addItem(viewItem)
+
+        let goItem = NSMenuItem()
+        let goMenu = NSMenu(title: "Go")
+
+        let nextItem = NSMenuItem(title: "Next Page", action: #selector(nextPage(_:)), keyEquivalent: "]")
+        nextItem.target = self
+        let prevItem = NSMenuItem(title: "Previous Page", action: #selector(previousPage(_:)), keyEquivalent: "[")
+        prevItem.target = self
+
+        let pageDownItem = NSMenuItem(
+            title: "Page Down",
+            action: #selector(pageDown(_:)),
+            keyEquivalent: String(utf16CodeUnits: [unichar(NSPageDownFunctionKey)], count: 1)
+        )
+        pageDownItem.target = self
+
+        let pageUpItem = NSMenuItem(
+            title: "Page Up",
+            action: #selector(pageUp(_:)),
+            keyEquivalent: String(utf16CodeUnits: [unichar(NSPageUpFunctionKey)], count: 1)
+        )
+        pageUpItem.target = self
+
+        let firstPageItem = NSMenuItem(
+            title: "First Page",
+            action: #selector(firstPage(_:)),
+            keyEquivalent: String(utf16CodeUnits: [unichar(NSHomeFunctionKey)], count: 1)
+        )
+        firstPageItem.target = self
+
+        let lastPageItem = NSMenuItem(
+            title: "Last Page",
+            action: #selector(lastPage(_:)),
+            keyEquivalent: String(utf16CodeUnits: [unichar(NSEndFunctionKey)], count: 1)
+        )
+        lastPageItem.target = self
+
+        goMenu.addItem(nextItem)
+        goMenu.addItem(prevItem)
+        goMenu.addItem(.separator())
+        goMenu.addItem(pageDownItem)
+        goMenu.addItem(pageUpItem)
+        goMenu.addItem(.separator())
+        goMenu.addItem(firstPageItem)
+        goMenu.addItem(lastPageItem)
+
+        goItem.submenu = goMenu
+        mainMenu.addItem(goItem)
 
         NSApp.mainMenu = mainMenu
     }

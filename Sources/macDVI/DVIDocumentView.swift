@@ -513,6 +513,173 @@ final class DVIDocumentView: NSView {
         let x = max((bounds.width - width) / 2, pageInset)
         return NSRect(x: x, y: y, width: width, height: height)
     }
+
+    // MARK: - Responder & Keyboard / Navigation
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard let characters = event.charactersIgnoringModifiers else {
+            super.keyDown(with: event)
+            return
+        }
+
+        switch characters {
+        case " ":
+            if event.modifierFlags.contains(.shift) {
+                scrollPageUp()
+            } else {
+                scrollPageDown()
+            }
+        case String(utf16CodeUnits: [unichar(NSPageDownFunctionKey)], count: 1):
+            scrollPageDown()
+        case String(utf16CodeUnits: [unichar(NSPageUpFunctionKey)], count: 1):
+            scrollPageUp()
+        case String(utf16CodeUnits: [unichar(NSDownArrowFunctionKey)], count: 1):
+            if event.modifierFlags.contains(.option) || event.modifierFlags.contains(.command) {
+                goToNextPage()
+            } else {
+                scrollLineDown()
+            }
+        case String(utf16CodeUnits: [unichar(NSUpArrowFunctionKey)], count: 1):
+            if event.modifierFlags.contains(.option) || event.modifierFlags.contains(.command) {
+                goToPreviousPage()
+            } else {
+                scrollLineUp()
+            }
+        case String(utf16CodeUnits: [unichar(NSHomeFunctionKey)], count: 1):
+            scrollToTop()
+        case String(utf16CodeUnits: [unichar(NSEndFunctionKey)], count: 1):
+            scrollToBottom()
+        default:
+            interpretKeyEvents([event])
+        }
+    }
+
+    @objc override func pageDown(_ sender: Any?) {
+        scrollPageDown()
+    }
+
+    @objc override func pageUp(_ sender: Any?) {
+        scrollPageUp()
+    }
+
+    @objc override func scrollPageDown(_ sender: Any?) {
+        scrollPageDown()
+    }
+
+    @objc override func scrollPageUp(_ sender: Any?) {
+        scrollPageUp()
+    }
+
+    @objc override func moveDown(_ sender: Any?) {
+        scrollLineDown()
+    }
+
+    @objc override func moveUp(_ sender: Any?) {
+        scrollLineUp()
+    }
+
+    @objc override func scrollToBeginningOfDocument(_ sender: Any?) {
+        scrollToTop()
+    }
+
+    @objc override func scrollToEndOfDocument(_ sender: Any?) {
+        scrollToBottom()
+    }
+
+    func scrollPageDown() {
+        guard let clipView = enclosingScrollView?.contentView else { return }
+        let currentOrigin = clipView.bounds.origin
+        let viewportHeight = clipView.bounds.height
+        let scrollDelta = max(viewportHeight - 40, 50)
+        let newY = min(currentOrigin.y + scrollDelta, max(bounds.height - viewportHeight, 0))
+        clipView.scroll(to: NSPoint(x: currentOrigin.x, y: newY))
+        enclosingScrollView?.reflectScrolledClipView(clipView)
+    }
+
+    func scrollPageUp() {
+        guard let clipView = enclosingScrollView?.contentView else { return }
+        let currentOrigin = clipView.bounds.origin
+        let viewportHeight = clipView.bounds.height
+        let scrollDelta = max(viewportHeight - 40, 50)
+        let newY = max(currentOrigin.y - scrollDelta, 0)
+        clipView.scroll(to: NSPoint(x: currentOrigin.x, y: newY))
+        enclosingScrollView?.reflectScrolledClipView(clipView)
+    }
+
+    func scrollLineDown() {
+        guard let clipView = enclosingScrollView?.contentView else { return }
+        let currentOrigin = clipView.bounds.origin
+        let viewportHeight = clipView.bounds.height
+        let newY = min(currentOrigin.y + 40, max(bounds.height - viewportHeight, 0))
+        clipView.scroll(to: NSPoint(x: currentOrigin.x, y: newY))
+        enclosingScrollView?.reflectScrolledClipView(clipView)
+    }
+
+    func scrollLineUp() {
+        guard let clipView = enclosingScrollView?.contentView else { return }
+        let currentOrigin = clipView.bounds.origin
+        let newY = max(currentOrigin.y - 40, 0)
+        clipView.scroll(to: NSPoint(x: currentOrigin.x, y: newY))
+        enclosingScrollView?.reflectScrolledClipView(clipView)
+    }
+
+    func scrollToTop() {
+        guard let clipView = enclosingScrollView?.contentView else { return }
+        clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: 0))
+        enclosingScrollView?.reflectScrolledClipView(clipView)
+    }
+
+    func scrollToBottom() {
+        guard let clipView = enclosingScrollView?.contentView else { return }
+        let viewportHeight = clipView.bounds.height
+        let newY = max(bounds.height - viewportHeight, 0)
+        clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: newY))
+        enclosingScrollView?.reflectScrolledClipView(clipView)
+    }
+
+    func scrollToPage(index: Int) {
+        guard let document, index >= 0, index < document.pages.count,
+              let clipView = enclosingScrollView?.contentView else { return }
+        let pageRect = rectForPage(at: index, page: document.pages[index])
+        let newY = max(pageRect.minY - pageGap / 2, 0)
+        clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: newY))
+        enclosingScrollView?.reflectScrolledClipView(clipView)
+    }
+
+    var currentPageIndex: Int {
+        guard let document, !document.pages.isEmpty,
+              let clipView = enclosingScrollView?.contentView else { return 0 }
+        let midY = clipView.bounds.midY
+        for (index, page) in document.pages.enumerated() {
+            let rect = rectForPage(at: index, page: page)
+            if midY >= rect.minY && midY <= rect.maxY {
+                return index
+            }
+            if rect.minY > midY {
+                return max(index - 1, 0)
+            }
+        }
+        return document.pages.count - 1
+    }
+
+    func goToNextPage() {
+        let next = min(currentPageIndex + 1, (document?.pages.count ?? 1) - 1)
+        scrollToPage(index: next)
+    }
+
+    func goToPreviousPage() {
+        let prev = max(currentPageIndex - 1, 0)
+        scrollToPage(index: prev)
+    }
 }
 
 private struct FontCacheKey: Hashable {
