@@ -85,8 +85,24 @@ enum DVIPageItem {
     case nativeGlyphArray(DVINativeGlyphArray)
     case pic(XDVPicItem)
     case postScriptPage(PostScriptPageItem)
+    case psGraphic(PostScriptGraphicItem)
     case rule(DVIRule)
     case special(DVISpecial)
+}
+
+struct PostScriptGraphicItem {
+    let filePath: String
+    let x: Double
+    let y: Double
+    let llx: Double
+    let lly: Double
+    let urx: Double
+    let ury: Double
+    let targetWidth: Double
+    let targetHeight: Double
+    let hoffset: Double
+    let voffset: Double
+    let clip: Bool
 }
 
 struct PostScriptPageItem {

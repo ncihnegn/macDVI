@@ -96,6 +96,8 @@ final class DVIDocumentView: NSView {
                 draw(pic: pic, in: pageRect, document: document)
             case .postScriptPage(let psPage):
                 draw(postScriptPage: psPage, in: pageRect, document: document)
+            case .psGraphic(let psGraphic):
+                draw(psGraphic: psGraphic, in: pageRect, document: document)
             case .rule(let rule):
                 draw(rule: rule, in: pageRect)
             case .special:
@@ -104,6 +106,57 @@ final class DVIDocumentView: NSView {
         }
 
         context.restoreGState()
+    }
+
+    private func draw(psGraphic: PostScriptGraphicItem, in pageRect: NSRect, document: DVIDocument) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+
+        var fileURL: URL?
+        if psGraphic.filePath.hasPrefix("/") {
+            fileURL = URL(fileURLWithPath: psGraphic.filePath)
+        } else {
+            let docDir = document.url.deletingLastPathComponent()
+            let candidate = docDir.appendingPathComponent(psGraphic.filePath)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                fileURL = candidate
+            } else if let found = TeXFileLocator.findFile(named: psGraphic.filePath) {
+                fileURL = URL(fileURLWithPath: found)
+            }
+        }
+
+        guard let resolvedURL = fileURL, FileManager.default.fileExists(atPath: resolvedURL.path) else {
+            return
+        }
+
+        let scale = max(window?.backingScaleFactor ?? 2.0, 1.0)
+        let renderWidth = CGFloat(psGraphic.targetWidth) * zoom
+        let renderHeight = CGFloat(psGraphic.targetHeight) * zoom
+        let pixelWidth = UInt32(max(renderWidth * scale * 2.0, 100))
+        let pixelHeight = UInt32(max(renderHeight * scale * 2.0, 100))
+
+        if let cgImage = NativePostScriptRenderer.shared.renderPage(
+            url: resolvedURL,
+            pageIndex: 0,
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight
+        ) {
+            let graphicX = pageRect.minX + CGFloat(psGraphic.x + psGraphic.hoffset) * zoom
+            let graphicY = pageRect.minY + CGFloat(psGraphic.y + psGraphic.voffset) * zoom - renderHeight
+            let graphicRect = CGRect(
+                x: graphicX,
+                y: graphicY,
+                width: renderWidth,
+                height: renderHeight
+            )
+            context.saveGState()
+            if psGraphic.clip {
+                context.clip(to: graphicRect)
+            }
+            context.translateBy(x: graphicRect.minX, y: graphicRect.maxY)
+            context.scaleBy(x: 1, y: -1)
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: graphicRect.width, height: graphicRect.height))
+            context.restoreGState()
+        }
     }
 
     private func draw(postScriptPage: PostScriptPageItem, in pageRect: NSRect, document: DVIDocument) {

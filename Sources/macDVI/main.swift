@@ -24,6 +24,17 @@ if let inspectIndex = arguments.firstIndex(of: "--inspect") {
         if !type1Fonts.isEmpty {
             print("Type 1 fonts: \(type1Fonts.joined(separator: ", "))")
         }
+        var graphics: [String] = []
+        for (pageIdx, page) in document.pages.enumerated() {
+            for item in page.items {
+                if case .psGraphic(let g) = item {
+                    graphics.append("Page \(pageIdx + 1): \(g.filePath) (\(g.targetWidth)x\(g.targetHeight))")
+                }
+            }
+        }
+        if !graphics.isEmpty {
+            print("Graphics (\(graphics.count)):\n  " + graphics.joined(separator: "\n  "))
+        }
         if !document.warnings.isEmpty {
             print("Warnings: \(document.warnings.count)")
         }

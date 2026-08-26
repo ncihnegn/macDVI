@@ -203,12 +203,18 @@ final class DVIParser {
                 let length = Int(try reader.readUnsigned(Int(opcode - 238)))
                 let bytes = try reader.readBytes(length)
                 if let text = String(data: bytes, encoding: .utf8) ?? String(data: bytes, encoding: .ascii) {
+                    let curX = xPoint(state.h, pointsPerDVIUnit)
+                    let curY = yPoint(state.v, pointsPerDVIUnit)
                     if var page = currentPage {
-                        page.add(.special(DVISpecial(
-                            x: xPoint(state.h, pointsPerDVIUnit),
-                            y: yPoint(state.v, pointsPerDVIUnit),
-                            text: text
-                        )))
+                        if let psGraphic = DVISpecialParser.postScriptGraphic(from: text, x: curX, y: curY) {
+                            page.add(.psGraphic(psGraphic))
+                        } else {
+                            page.add(.special(DVISpecial(
+                                x: curX,
+                                y: curY,
+                                text: text
+                            )))
+                        }
                         currentPage = page
                     }
                     applySpecial(text, state: &state, at: opcodeOffset)
@@ -892,6 +898,9 @@ private struct PageBuilder {
             case .postScriptPage(let ps):
                 maxX = max(maxX, ps.width)
                 maxY = max(maxY, ps.height)
+            case .psGraphic(let g):
+                maxX = max(maxX, g.x + g.hoffset + g.targetWidth + 72)
+                maxY = max(maxY, g.y + g.voffset + 72)
             case .rule(let rule):
                 maxX = max(maxX, rule.x + rule.width + 72)
                 maxY = max(maxY, rule.y + rule.height + 72)
@@ -908,6 +917,117 @@ private enum DVISpecialParser {
     enum ColorCommand {
         case push(DVIColor?)
         case pop
+    }
+
+    static func postScriptGraphic(from text: String, x: Double, y: Double) -> PostScriptGraphicItem? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        guard lower.hasPrefix("psfile") || lower.hasPrefix("epsfile") else {
+            return nil
+        }
+
+        var filePath: String?
+        var llx: Double = 0
+        var lly: Double = 0
+        var urx: Double = 0
+        var ury: Double = 0
+        var rwi: Double?
+        var rhi: Double?
+        var hscale: Double?
+        var vscale: Double?
+        var hsize: Double?
+        var vsize: Double?
+        var hoffset: Double = 0
+        var voffset: Double = 0
+        var clip = false
+
+        let scanner = Scanner(string: trimmed)
+        scanner.charactersToBeSkipped = nil
+
+        while !scanner.isAtEnd {
+            _ = scanner.scanCharacters(from: .whitespacesAndNewlines)
+            guard let token = scanner.scanUpToCharacters(from: .whitespacesAndNewlines) else { break }
+            let parts = token.split(separator: "=", maxSplits: 1)
+            let key = parts[0].lowercased()
+            let val = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: CharacterSet(charactersIn: "\"'")) : ""
+
+            switch key {
+            case "psfile", "epsfile":
+                filePath = val
+            case "llx":
+                llx = Double(val) ?? 0
+            case "lly":
+                lly = Double(val) ?? 0
+            case "urx":
+                urx = Double(val) ?? 0
+            case "ury":
+                ury = Double(val) ?? 0
+            case "rwi":
+                rwi = Double(val)
+            case "rhi":
+                rhi = Double(val)
+            case "hscale":
+                hscale = Double(val)
+            case "vscale":
+                vscale = Double(val)
+            case "hsize":
+                hsize = Double(val)
+            case "vsize":
+                vsize = Double(val)
+            case "hoffset":
+                hoffset = Double(val) ?? 0
+            case "voffset":
+                voffset = Double(val) ?? 0
+            case "clip":
+                clip = true
+            default:
+                break
+            }
+        }
+
+        guard let path = filePath, !path.isEmpty else { return nil }
+
+        let naturalWidth = max(urx - llx, 1.0)
+        let naturalHeight = max(ury - lly, 1.0)
+
+        let targetWidth: Double
+        if let rwi = rwi {
+            targetWidth = rwi / 10.0
+        } else if let hsize = hsize {
+            targetWidth = hsize
+        } else if let hscale = hscale {
+            targetWidth = naturalWidth * (hscale / 100.0)
+        } else {
+            targetWidth = naturalWidth
+        }
+
+        let targetHeight: Double
+        if let rhi = rhi {
+            targetHeight = rhi / 10.0
+        } else if let vsize = vsize {
+            targetHeight = vsize
+        } else if let vscale = vscale {
+            targetHeight = naturalHeight * (vscale / 100.0)
+        } else if rwi != nil {
+            targetHeight = naturalHeight * (targetWidth / naturalWidth)
+        } else {
+            targetHeight = naturalHeight
+        }
+
+        return PostScriptGraphicItem(
+            filePath: path,
+            x: x,
+            y: y,
+            llx: llx,
+            lly: lly,
+            urx: urx,
+            ury: ury,
+            targetWidth: targetWidth,
+            targetHeight: targetHeight,
+            hoffset: hoffset,
+            voffset: voffset,
+            clip: clip
+        )
     }
 
     static func colorCommand(from text: String) -> ColorCommand? {
