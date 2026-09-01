@@ -8,15 +8,47 @@ final class NativePostScriptRenderer {
 
     private let cache = NSCache<NSString, CGImage>()
 
-    func renderPage(url: URL, pageIndex: Int, pixelWidth: UInt32, pixelHeight: UInt32) -> CGImage? {
-        let cacheKey = "\(url.path):\(pageIndex):\(pixelWidth)x\(pixelHeight)" as NSString
+    static func isPostScript(url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        if ext == "ps" || ext == "eps" {
+            return true
+        }
+
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
+            return false
+        }
+
+        let prefix = Array(data.prefix(1024))
+        var start = 0
+        if prefix.starts(with: [0xEF, 0xBB, 0xBF]) {
+            start = 3
+        }
+        while start < prefix.count, prefix[start] == 0x09 || prefix[start] == 0x0A ||
+                prefix[start] == 0x0C || prefix[start] == 0x0D || prefix[start] == 0x20 {
+            start += 1
+        }
+        return prefix.dropFirst(start).starts(with: [0x25, 0x21])
+    }
+
+    func renderPage(
+        url: URL,
+        pageIndex: Int,
+        pixelWidth: UInt32,
+        pixelHeight: UInt32,
+        boundingBox: CGRect? = nil
+    ) -> CGImage? {
+        let boundingBoxKey = boundingBox.map {
+            ":\($0.minX),\($0.minY),\($0.width),\($0.height)"
+        } ?? ""
+        let cacheKey = "\(url.path):\(pageIndex):\(pixelWidth)x\(pixelHeight)\(boundingBoxKey)" as NSString
         if let cached = cache.object(forKey: cacheKey) {
             return cached
         }
 
         guard let data = try? Data(contentsOf: url) else { return nil }
+        let renderData = boundingBox.map { normalizedGraphicData(data, boundingBox: $0) } ?? data
 
-        let image = data.withUnsafeBytes { rawBuffer -> CGImage? in
+        let image = renderData.withUnsafeBytes { rawBuffer -> CGImage? in
             guard let baseAddress = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
                 return nil
             }
@@ -63,6 +95,43 @@ final class NativePostScriptRenderer {
             cache.setObject(image, forKey: cacheKey)
         }
         return image
+    }
+
+    private func normalizedGraphicData(_ data: Data, boundingBox: CGRect) -> Data {
+        let width = max(boundingBox.width, 1.0)
+        let height = max(boundingBox.height, 1.0)
+        let scaleX = 612.0 / width
+        let scaleY = 792.0 / height
+
+        let sourceText = String(decoding: data, as: UTF8.self)
+        var fontAliases = Set<String>()
+        for line in sourceText.split(whereSeparator: \.isNewline) {
+            let fields = line.split(whereSeparator: \.isWhitespace)
+            guard fields.count >= 2, fields[0] == "%*Font:" else { continue }
+            fontAliases.insert(String(fields[1]))
+        }
+
+        let aliases = fontAliases.sorted().map {
+            "/\($0) /\($0.uppercased()) def\n"
+        }.joined()
+        let setup = """
+        /fshow { exch dup type /nametype ne { cvn } if findfont exch scalefont setfont show } bind def
+        \(aliases)\(scaleX) \(scaleY) scale
+        \(-boundingBox.minX) \(-boundingBox.minY) translate\n
+        """
+
+        let pageMarker = Data("%%Page:".utf8)
+        guard let pageOffset = data.range(of: pageMarker)?.lowerBound else {
+            var result = Data(setup.utf8)
+            result.append(data)
+            return result
+        }
+
+        var result = Data()
+        result.append(data.prefix(upTo: pageOffset))
+        result.append(Data(setup.utf8))
+        result.append(data.suffix(from: pageOffset))
+        return result
     }
 }
 

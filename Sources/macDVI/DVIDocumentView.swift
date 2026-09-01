@@ -174,6 +174,7 @@ final class DVIDocumentView: NSView {
         context.scaleBy(x: 1, y: -1)
 
         let ext = resolvedURL.pathExtension.lowercased()
+        let isPostScript = NativePostScriptRenderer.isPostScript(url: resolvedURL)
         if ext == "pdf",
            let pdfDoc = CGPDFDocument(resolvedURL as CFURL),
            let pdfPage = pdfDoc.page(at: 1) {
@@ -186,12 +187,18 @@ final class DVIDocumentView: NSView {
             )
             context.drawPDFPage(pdfPage)
             context.restoreGState()
-        } else if ext == "ps" || ext == "eps",
+        } else if isPostScript,
                   let cgImage = NativePostScriptRenderer.shared.renderPage(
                       url: resolvedURL,
                       pageIndex: 0,
                       pixelWidth: pixelWidth,
-                      pixelHeight: pixelHeight
+                      pixelHeight: pixelHeight,
+                      boundingBox: CGRect(
+                          x: psGraphic.llx,
+                          y: psGraphic.lly,
+                          width: max(psGraphic.urx - psGraphic.llx, 1),
+                          height: max(psGraphic.ury - psGraphic.lly, 1)
+                      )
                   ) {
             context.draw(
                 cgImage,
@@ -247,6 +254,7 @@ final class DVIDocumentView: NSView {
         }
 
         let ext = resolvedURL.pathExtension.lowercased()
+        let isPostScript = NativePostScriptRenderer.isPostScript(url: resolvedURL)
         let x = pageRect.minX + CGFloat(pic.x) * zoom
         let y = pageRect.minY + CGFloat(pic.y) * zoom
 
@@ -275,7 +283,7 @@ final class DVIDocumentView: NSView {
             context.translateBy(x: 0, y: -box.height)
             context.drawPDFPage(pdfPage)
             context.restoreGState()
-        } else if (ext == "ps" || ext == "eps"),
+        } else if isPostScript,
                   let cgImage = NativePostScriptRenderer.shared.renderPage(
                       url: resolvedURL,
                       pageIndex: max(pic.pageNumber - 1, 0),
