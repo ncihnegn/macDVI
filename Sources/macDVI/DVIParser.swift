@@ -186,7 +186,16 @@ final class DVIParser {
                 }
                 currentPage = nil
             case 141:
-                state.stack.append(DVIStackFrame(h: state.h, v: state.v, w: state.w, x: state.x, y: state.y, z: state.z))
+                state.stack.append(DVIStackFrame(
+                    h: state.h,
+                    v: state.v,
+                    w: state.w,
+                    x: state.x,
+                    y: state.y,
+                    z: state.z,
+                    transformOffsetX: state.transformOffsetX,
+                    transformOffsetY: state.transformOffsetY
+                ))
             case 142:
                 guard let frame = state.stack.popLast() else {
                     throw DVIError.malformed("pop with empty DVI stack at byte offset \(opcodeOffset)")
@@ -197,6 +206,8 @@ final class DVIParser {
                 state.x = frame.x
                 state.y = frame.y
                 state.z = frame.z
+                state.transformOffsetX = frame.transformOffsetX
+                state.transformOffsetY = frame.transformOffsetY
             case 143...146:
                 state.h += try reader.readSigned(Int(opcode - 142))
             case 147:
@@ -233,8 +244,8 @@ final class DVIParser {
                 let length = Int(try reader.readUnsigned(Int(opcode - 238)))
                 let bytes = try reader.readBytes(length)
                 if let text = String(data: bytes, encoding: .utf8) ?? String(data: bytes, encoding: .ascii) {
-                    let curX = xPoint(state.h, pointsPerDVIUnit)
-                    let curY = yPoint(state.v, pointsPerDVIUnit)
+                    let curX = effectiveX(state.h, pointsPerDVIUnit, state: state)
+                    let curY = effectiveY(state.v, pointsPerDVIUnit, state: state)
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if trimmed.hasPrefix("!") {
                         let headerCode = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -326,8 +337,8 @@ final class DVIParser {
             page?.add(.glyph(DVIGlyph(
                 fontNumber: fontNumber,
                 characterCode: characterCode,
-                x: xPoint(state.h, pointsPerDVIUnit),
-                baselineY: yPoint(state.v, pointsPerDVIUnit),
+                x: effectiveX(state.h, pointsPerDVIUnit, state: state),
+                baselineY: effectiveY(state.v, pointsPerDVIUnit, state: state),
                 advance: Double(metric.widthDVIUnits) * pointsPerDVIUnit,
                 height: Double(metric.heightDVIUnits) * pointsPerDVIUnit,
                 depth: Double(metric.depthDVIUnits) * pointsPerDVIUnit,
@@ -367,6 +378,8 @@ final class DVIParser {
         var localState = DVIState()
         localState.h = state.h
         localState.v = state.v
+        localState.transformOffsetX = state.transformOffsetX
+        localState.transformOffsetY = state.transformOffsetY
         localState.currentColor = state.currentColor
         localState.colorStack = state.colorStack
         if let firstLocal = virtualFont.localFonts.first,
@@ -415,7 +428,16 @@ final class DVIParser {
             case 138:
                 continue
             case 141:
-                state.stack.append(DVIStackFrame(h: state.h, v: state.v, w: state.w, x: state.x, y: state.y, z: state.z))
+                state.stack.append(DVIStackFrame(
+                    h: state.h,
+                    v: state.v,
+                    w: state.w,
+                    x: state.x,
+                    y: state.y,
+                    z: state.z,
+                    transformOffsetX: state.transformOffsetX,
+                    transformOffsetY: state.transformOffsetY
+                ))
             case 142:
                 guard let frame = state.stack.popLast() else {
                     throw DVIError.malformed("VF: pop with empty stack")
@@ -426,6 +448,8 @@ final class DVIParser {
                 state.x = frame.x
                 state.y = frame.y
                 state.z = frame.z
+                state.transformOffsetX = frame.transformOffsetX
+                state.transformOffsetY = frame.transformOffsetY
             case 143...146:
                 state.h += try reader.readSigned(Int(opcode - 142))
             case 147:
@@ -531,8 +555,8 @@ final class DVIParser {
             let widthPoints = Double(width) * pointsPerDVIUnit
             let heightPoints = Double(height) * pointsPerDVIUnit
             page?.add(.rule(DVIRule(
-                x: xPoint(state.h, pointsPerDVIUnit),
-                y: yPoint(state.v - height, pointsPerDVIUnit),
+                x: effectiveX(state.h, pointsPerDVIUnit, state: state),
+                y: effectiveY(state.v - height, pointsPerDVIUnit, state: state),
                 width: widthPoints,
                 height: heightPoints,
                 color: state.currentColor
@@ -637,7 +661,21 @@ final class DVIParser {
         pageOriginOffsetPoints + Double(dviUnits) * pointsPerDVIUnit
     }
 
+    private func effectiveX(_ dviUnits: Int64, _ pointsPerDVIUnit: Double, state: DVIState) -> Double {
+        xPoint(dviUnits, pointsPerDVIUnit) + state.transformOffsetX
+    }
+
+    private func effectiveY(_ dviUnits: Int64, _ pointsPerDVIUnit: Double, state: DVIState) -> Double {
+        yPoint(dviUnits, pointsPerDVIUnit) + state.transformOffsetY
+    }
+
     private func applySpecial(_ text: String, state: inout DVIState, at offset: Int) {
+        if let concat = DVISpecialParser.postScriptConcat(from: text) {
+            state.transformOffsetX += concat.tx
+            // In PostScript, +ty is upwards; in DVI coordinate system, +y is downwards.
+            state.transformOffsetY -= concat.ty
+        }
+
         guard let command = DVISpecialParser.colorCommand(from: text) else {
             return
         }
@@ -755,8 +793,8 @@ final class DVIParser {
                 fontNumber: fontNumber,
                 width: Double(widthDVI) * pointsPerDVIUnit,
                 glyphs: placedGlyphs,
-                x: xPoint(state.h, pointsPerDVIUnit),
-                baselineY: yPoint(state.v, pointsPerDVIUnit),
+                x: effectiveX(state.h, pointsPerDVIUnit, state: state),
+                baselineY: effectiveY(state.v, pointsPerDVIUnit, state: state),
                 fontSize: fontSize,
                 color: color
             )
@@ -801,8 +839,8 @@ final class DVIParser {
                 transform: matrix,
                 pageNumber: pageNumber,
                 path: filePath,
-                x: xPoint(state.h, pointsPerDVIUnit),
-                y: yPoint(state.v, pointsPerDVIUnit)
+                x: effectiveX(state.h, pointsPerDVIUnit, state: state),
+                y: effectiveY(state.v, pointsPerDVIUnit, state: state)
             )
             page?.add(.pic(picItem))
         }
@@ -883,6 +921,8 @@ private struct DVIState {
     var x: Int64 = 0
     var y: Int64 = 0
     var z: Int64 = 0
+    var transformOffsetX: Double = 0
+    var transformOffsetY: Double = 0
     var currentFontNumber: Int?
     var currentColor: DVIColor = .black
     var colorStack: [DVIColor] = []
@@ -896,6 +936,8 @@ private struct DVIStackFrame {
     let x: Int64
     let y: Int64
     let z: Int64
+    let transformOffsetX: Double
+    let transformOffsetY: Double
 }
 
 private struct PageBuilder {
@@ -1086,6 +1128,35 @@ private enum DVISpecialParser {
             return PostScriptInlineItem(code: code, x: x, y: y, syncCurrentPoint: false)
         }
         return nil
+    }
+
+    /// Parses translation from PostScript concat commands like `[1.0 0.0 0.0 1.0 tx ty] concat`
+    static func postScriptConcat(from text: String) -> (tx: Double, ty: Double)? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let s: String
+        if trimmed.hasPrefix("ps::") {
+            s = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if trimmed.hasPrefix("ps:") {
+            s = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            return nil
+        }
+        guard s.contains("concat") else { return nil }
+
+        // Find matrix brackets [ ... ]
+        guard let openBracket = s.firstIndex(of: "["),
+              let closeBracket = s.firstIndex(of: "]"),
+              openBracket < closeBracket else {
+            return nil
+        }
+        let matrixStr = s[s.index(after: openBracket)..<closeBracket]
+        let tokens = matrixStr.split(whereSeparator: { $0.isWhitespace })
+        guard tokens.count == 6,
+              let tx = Double(tokens[4]),
+              let ty = Double(tokens[5]) else {
+            return nil
+        }
+        return (tx: tx, ty: ty)
     }
 
     static func colorCommand(from text: String) -> ColorCommand? {

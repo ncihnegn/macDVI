@@ -71,7 +71,7 @@ final class DVIDocumentView: NSView {
         }
     }
 
-    private func pageImage(at index: Int, page: DVIPage, in pageRect: NSRect, document: DVIDocument) -> NSImage {
+    func pageImage(at index: Int, page: DVIPage, in pageRect: NSRect, document: DVIDocument) -> NSImage {
         let cacheKey = "\(document.url.path):\(index):\(Int(zoom * 1000))" as NSString
         if let cached = pageRenderCache.object(forKey: cacheKey) {
             return cached

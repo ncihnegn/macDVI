@@ -28,7 +28,14 @@ if let inspectIndex = arguments.firstIndex(of: "--inspect") {
         for (pageIdx, page) in document.pages.enumerated() {
             for item in page.items {
                 if case .psGraphic(let g) = item {
-                    graphics.append("Page \(pageIdx + 1): \(g.filePath) (\(g.targetWidth)x\(g.targetHeight))")
+                    graphics.append("Page \(pageIdx + 1): \(g.filePath) at (\(g.x), \(g.y)) (\(g.targetWidth)x\(g.targetHeight))")
+                }
+            }
+        }
+        if let p1 = document.pages.first {
+            for item in p1.items {
+                if case .glyph(let g) = item, g.characterCode == 79 { // 'O'
+                    print("Glyph 'O' at x=\(g.x), baselineY=\(g.baselineY)")
                 }
             }
         }
@@ -43,6 +50,40 @@ if let inspectIndex = arguments.firstIndex(of: "--inspect") {
         print("Page 1 inline PostScript items: \(page1PSCount)")
         if !document.warnings.isEmpty {
             print("Warnings: \(document.warnings.count)")
+        }
+        exit(0)
+    } catch {
+        FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
+        exit(1)
+    }
+}
+
+if let renderIndex = arguments.firstIndex(of: "--render-page") {
+    var renderArgs = arguments
+    renderArgs.remove(at: renderIndex)
+    guard renderArgs.count >= 3,
+          let pageNum = Int(renderArgs[1]) else {
+        FileHandle.standardError.write(Data("usage: macDVI --render-page file.dvi <pageNumber> <out.png>\n".utf8))
+        exit(64)
+    }
+    let dviURL = URL(fileURLWithPath: renderArgs[0])
+    let outURL = URL(fileURLWithPath: renderArgs[2])
+    do {
+        let doc = try DVIParser(url: dviURL).parse()
+        guard pageNum >= 1, pageNum <= doc.pages.count else {
+            FileHandle.standardError.write(Data("page out of bounds\n".utf8))
+            exit(1)
+        }
+        let page = doc.pages[pageNum - 1]
+        let pageRect = NSRect(origin: .zero, size: page.mediaBox)
+        let view = DVIDocumentView(frame: pageRect)
+        view.document = doc
+        let img = view.pageImage(at: pageNum - 1, page: page, in: pageRect, document: doc)
+        if let tiff = img.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: NSBitmapImageRep.FileType.png, properties: [:]) {
+            try png.write(to: outURL)
+            print("Rendered page \(pageNum) to \(outURL.path)")
         }
         exit(0)
     } catch {
