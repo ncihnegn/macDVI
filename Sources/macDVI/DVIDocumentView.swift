@@ -125,7 +125,11 @@ final class DVIDocumentView: NSView {
                 pixelWidth: pixelWidth,
                 pixelHeight: pixelHeight
             ) {
+                context.saveGState()
+                context.translateBy(x: 0, y: pageRect.height)
+                context.scaleBy(x: 1, y: -1)
                 context.draw(psImage, in: CGRect(x: 0, y: 0, width: pageRect.width, height: pageRect.height))
+                context.restoreGState()
             }
         }
 
