@@ -17,6 +17,7 @@ final class DVIParser {
     private var nextSyntheticFontNumber: Int = 1_000_000
     private var virtualFontExpansionDepth = 0
     private let maxVirtualFontExpansionDepth = 16
+    private var postScriptHeaders: [String] = []
 
     init(url: URL) throws {
         self.url = url
@@ -35,7 +36,14 @@ final class DVIParser {
         }
         prefetchFontFiles()
         let pages = try parsePages(preamble: preamble)
-        return DVIDocument(url: url, preamble: preamble, fonts: fonts, pages: pages, warnings: warnings)
+        return DVIDocument(
+            url: url,
+            preamble: preamble,
+            fonts: fonts,
+            pages: pages,
+            warnings: warnings,
+            postScriptHeaders: postScriptHeaders
+        )
     }
 
     private func prefetchFontFiles() {
@@ -227,9 +235,17 @@ final class DVIParser {
                 if let text = String(data: bytes, encoding: .utf8) ?? String(data: bytes, encoding: .ascii) {
                     let curX = xPoint(state.h, pointsPerDVIUnit)
                     let curY = yPoint(state.v, pointsPerDVIUnit)
-                    if var page = currentPage {
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed.hasPrefix("!") {
+                        let headerCode = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !headerCode.isEmpty {
+                            postScriptHeaders.append(headerCode)
+                        }
+                    } else if var page = currentPage {
                         if let psGraphic = DVISpecialParser.postScriptGraphic(from: text, x: curX, y: curY) {
                             page.add(.psGraphic(psGraphic))
+                        } else if let psInline = DVISpecialParser.postScriptInline(from: text, x: curX, y: curY) {
+                            page.add(.psInline(psInline))
                         } else {
                             page.add(.special(DVISpecial(
                                 x: curX,
@@ -921,6 +937,8 @@ private struct PageBuilder {
             case .psGraphic(let g):
                 maxX = max(maxX, g.x + g.hoffset + g.targetWidth + 72)
                 maxY = max(maxY, g.y + g.voffset + 72)
+            case .psInline:
+                break
             case .rule(let rule):
                 maxX = max(maxX, rule.x + rule.width + 72)
                 maxY = max(maxY, rule.y + rule.height + 72)
@@ -1056,6 +1074,18 @@ private enum DVISpecialParser {
             voffset: voffset,
             clip: clip
         )
+    }
+
+    static func postScriptInline(from text: String, x: Double, y: Double) -> PostScriptInlineItem? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("ps::") {
+            let code = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return PostScriptInlineItem(code: code, x: x, y: y, syncCurrentPoint: true)
+        } else if trimmed.hasPrefix("ps:") {
+            let code = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return PostScriptInlineItem(code: code, x: x, y: y, syncCurrentPoint: false)
+        }
+        return nil
     }
 
     static func colorCommand(from text: String) -> ColorCommand? {

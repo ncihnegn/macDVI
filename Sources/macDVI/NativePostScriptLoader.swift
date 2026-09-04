@@ -97,6 +97,85 @@ final class NativePostScriptRenderer {
         return image
     }
 
+    func renderInlinePostScript(
+        documentHeaders: [String],
+        inlineItems: [PostScriptInlineItem],
+        pageWidth: Double,
+        pageHeight: Double,
+        pixelWidth: UInt32,
+        pixelHeight: UInt32
+    ) -> CGImage? {
+        guard !inlineItems.isEmpty else { return nil }
+
+        guard let handle = ps_interp_create(pageWidth, pageHeight, pixelWidth, pixelHeight) else {
+            return nil
+        }
+        defer { ps_interp_free(handle) }
+
+        // 1. Execute document-level header specials
+        for header in documentHeaders {
+            header.utf8CString.withUnsafeBufferPointer { buf in
+                guard let base = buf.baseAddress else { return }
+                let len = buf.count - 1
+                if len > 0 {
+                    _ = ps_interp_execute(handle, UnsafeRawPointer(base).assumingMemoryBound(to: UInt8.self), len)
+                }
+            }
+        }
+
+        // 2. Execute page-level inline PostScript items in order
+        for item in inlineItems {
+            if item.syncCurrentPoint {
+                // In DVI, origin is top-left (y increases downwards).
+                // In PostScript, user coordinate origin is bottom-left (y increases upwards).
+                let psX = item.x
+                let psY = pageHeight - item.y
+                _ = ps_interp_set_current_point(handle, psX, psY)
+            }
+
+            item.code.utf8CString.withUnsafeBufferPointer { buf in
+                guard let base = buf.baseAddress else { return }
+                let len = buf.count - 1
+                if len > 0 {
+                    _ = ps_interp_execute(handle, UnsafeRawPointer(base).assumingMemoryBound(to: UInt8.self), len)
+                }
+            }
+        }
+
+        // 3. Render rendered commands to transparent RGBA buffer
+        let byteCount = Int(pixelWidth * pixelHeight * 4)
+        var pixelData = Data(count: byteCount)
+
+        let success = pixelData.withUnsafeMutableBytes { outBuffer -> Bool in
+            guard let outPtr = outBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                return false
+            }
+            return ps_interp_render_rgba(handle, outPtr, pixelWidth, pixelHeight) == 0
+        }
+
+        guard success else { return nil }
+        guard let provider = CGDataProvider(data: pixelData as CFData) else { return nil }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo: CGBitmapInfo = [
+            CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            .byteOrder32Big
+        ]
+
+        return CGImage(
+            width: Int(pixelWidth),
+            height: Int(pixelHeight),
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: Int(pixelWidth * 4),
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        )
+    }
+
     private func normalizedGraphicData(_ data: Data, boundingBox: CGRect) -> Data {
         let width = max(boundingBox.width, 1.0)
         let height = max(boundingBox.height, 1.0)

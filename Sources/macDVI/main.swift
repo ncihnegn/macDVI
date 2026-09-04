@@ -35,6 +35,12 @@ if let inspectIndex = arguments.firstIndex(of: "--inspect") {
         if !graphics.isEmpty {
             print("Graphics (\(graphics.count)):\n  " + graphics.joined(separator: "\n  "))
         }
+        print("PostScript headers: \(document.postScriptHeaders.count)")
+        let page1PSCount = document.pages.first?.items.filter {
+            if case .psInline = $0 { return true }
+            return false
+        }.count ?? 0
+        print("Page 1 inline PostScript items: \(page1PSCount)")
         if !document.warnings.isEmpty {
             print("Warnings: \(document.warnings.count)")
         }

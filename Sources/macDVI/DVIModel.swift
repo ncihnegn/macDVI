@@ -71,6 +71,23 @@ struct DVIDocument {
     let fonts: [Int: DVIFontDefinition]
     let pages: [DVIPage]
     let warnings: [String]
+    let postScriptHeaders: [String]
+
+    init(
+        url: URL,
+        preamble: DVIPreamble,
+        fonts: [Int: DVIFontDefinition],
+        pages: [DVIPage],
+        warnings: [String],
+        postScriptHeaders: [String] = []
+    ) {
+        self.url = url
+        self.preamble = preamble
+        self.fonts = fonts
+        self.pages = pages
+        self.warnings = warnings
+        self.postScriptHeaders = postScriptHeaders
+    }
 }
 
 struct DVIPage {
@@ -86,8 +103,16 @@ enum DVIPageItem {
     case pic(XDVPicItem)
     case postScriptPage(PostScriptPageItem)
     case psGraphic(PostScriptGraphicItem)
+    case psInline(PostScriptInlineItem)
     case rule(DVIRule)
     case special(DVISpecial)
+}
+
+struct PostScriptInlineItem {
+    let code: String
+    let x: Double
+    let y: Double
+    let syncCurrentPoint: Bool
 }
 
 struct PostScriptGraphicItem {

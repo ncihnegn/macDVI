@@ -108,6 +108,27 @@ final class DVIDocumentView: NSView {
         context.saveGState()
         context.clip(to: pageRect)
 
+        // Render inline PostScript items (such as TikZ / PGF / tcolorbox backgrounds) underneath text and rules
+        let inlinePSItems = page.items.compactMap { item -> PostScriptInlineItem? in
+            guard case .psInline(let ps) = item else { return nil }
+            return ps
+        }
+        if !inlinePSItems.isEmpty {
+            let scale = max(window?.backingScaleFactor ?? 2.0, 1.0)
+            let pixelWidth = UInt32(max(pageRect.width * scale, 1))
+            let pixelHeight = UInt32(max(pageRect.height * scale, 1))
+            if let psImage = NativePostScriptRenderer.shared.renderInlinePostScript(
+                documentHeaders: document.postScriptHeaders,
+                inlineItems: inlinePSItems,
+                pageWidth: pageRect.width,
+                pageHeight: pageRect.height,
+                pixelWidth: pixelWidth,
+                pixelHeight: pixelHeight
+            ) {
+                context.draw(psImage, in: CGRect(x: 0, y: 0, width: pageRect.width, height: pageRect.height))
+            }
+        }
+
         for item in page.items {
             switch item {
             case .glyph(let glyph):
@@ -120,6 +141,8 @@ final class DVIDocumentView: NSView {
                 draw(postScriptPage: psPage, in: pageRect, document: document)
             case .psGraphic(let psGraphic):
                 draw(psGraphic: psGraphic, in: pageRect, document: document)
+            case .psInline:
+                continue
             case .rule(let rule):
                 draw(rule: rule, in: pageRect)
             case .special:
