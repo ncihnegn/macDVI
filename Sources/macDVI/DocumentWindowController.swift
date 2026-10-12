@@ -307,6 +307,12 @@ final class DocumentWindowController: NSWindowController {
         pdfView.go(to: topOfPage)
     }
 
+    private func positionDVIView(at targetIndex: Int) {
+        guard let dviView else { return }
+        window?.contentView?.layoutSubtreeIfNeeded()
+        dviView.scrollToPage(index: targetIndex)
+    }
+
     private func showNative(document: DVIDocument) {
         cleanUpObservers()
         pdfView = nil
@@ -336,14 +342,13 @@ final class DocumentWindowController: NSWindowController {
             targetIndex = 0
         }
 
-        if targetIndex > 0 {
-            isRestoringPage = true
-            DispatchQueue.main.async { [weak self, weak dviView] in
-                guard let self, let dviView else { return }
-                dviView.scrollToPage(index: targetIndex)
-                DispatchQueue.main.async { [weak self] in
-                    self?.isRestoringPage = false
-                }
+        isRestoringPage = true
+        positionDVIView(at: targetIndex)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.positionDVIView(at: targetIndex)
+            DispatchQueue.main.async { [weak self] in
+                self?.isRestoringPage = false
             }
         }
 

@@ -47,6 +47,7 @@ final class DVIDocumentView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
         layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
     }
 
@@ -716,6 +717,7 @@ final class DVIDocumentView: NSView {
         let newY = min(currentOrigin.y + scrollDelta, max(bounds.height - viewportHeight, 0))
         clipView.scroll(to: NSPoint(x: currentOrigin.x, y: newY))
         enclosingScrollView?.reflectScrolledClipView(clipView)
+        needsDisplay = true
     }
 
     func scrollPageUp() {
@@ -726,6 +728,7 @@ final class DVIDocumentView: NSView {
         let newY = max(currentOrigin.y - scrollDelta, 0)
         clipView.scroll(to: NSPoint(x: currentOrigin.x, y: newY))
         enclosingScrollView?.reflectScrolledClipView(clipView)
+        needsDisplay = true
     }
 
     func scrollLineDown() {
@@ -735,6 +738,7 @@ final class DVIDocumentView: NSView {
         let newY = min(currentOrigin.y + 40, max(bounds.height - viewportHeight, 0))
         clipView.scroll(to: NSPoint(x: currentOrigin.x, y: newY))
         enclosingScrollView?.reflectScrolledClipView(clipView)
+        needsDisplay = true
     }
 
     func scrollLineUp() {
@@ -743,12 +747,14 @@ final class DVIDocumentView: NSView {
         let newY = max(currentOrigin.y - 40, 0)
         clipView.scroll(to: NSPoint(x: currentOrigin.x, y: newY))
         enclosingScrollView?.reflectScrolledClipView(clipView)
+        needsDisplay = true
     }
 
     func scrollToTop() {
         guard let clipView = enclosingScrollView?.contentView else { return }
         clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: 0))
         enclosingScrollView?.reflectScrolledClipView(clipView)
+        needsDisplay = true
     }
 
     func scrollToBottom() {
@@ -757,15 +763,22 @@ final class DVIDocumentView: NSView {
         let newY = max(bounds.height - viewportHeight, 0)
         clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: newY))
         enclosingScrollView?.reflectScrolledClipView(clipView)
+        needsDisplay = true
     }
 
     func scrollToPage(index: Int) {
         guard let document, index >= 0, index < document.pages.count,
               let clipView = enclosingScrollView?.contentView else { return }
-        let pageRect = rectForPage(at: index, page: document.pages[index])
-        let newY = max(pageRect.minY - pageGap / 2, 0)
+        let newY: CGFloat
+        if index == 0 {
+            newY = 0
+        } else {
+            let pageRect = rectForPage(at: index, page: document.pages[index])
+            newY = max(pageRect.minY - pageGap / 2, 0)
+        }
         clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: newY))
         enclosingScrollView?.reflectScrolledClipView(clipView)
+        needsDisplay = true
     }
 
     var currentPageIndex: Int {
