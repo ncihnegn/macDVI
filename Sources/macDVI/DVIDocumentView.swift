@@ -672,6 +672,12 @@ final class DVIDocumentView: NSView {
             scrollToTop()
         case String(utf16CodeUnits: [unichar(NSEndFunctionKey)], count: 1):
             scrollToBottom()
+        case "g", "G":
+            if event.modifierFlags.intersection([.command, .option, .control]).isEmpty {
+                NSApp.sendAction(#selector(DocumentWindowController.goToPage(_:)), to: nil, from: self)
+            } else {
+                interpretKeyEvents([event])
+            }
         default:
             interpretKeyEvents([event])
         }

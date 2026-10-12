@@ -131,6 +131,71 @@ final class DocumentWindowController: NSWindowController {
         }
     }
 
+    @objc func goToPage(_ sender: Any?) {
+        guard let window else { return }
+        let totalPages: Int
+        let currentPage: Int
+        if let dviView, let doc = dviView.document {
+            totalPages = doc.pages.count
+            currentPage = dviView.currentPageIndex + 1
+        } else if let pdfView, let doc = pdfView.document {
+            totalPages = doc.pageCount
+            currentPage = (pdfView.currentPage != nil ? doc.index(for: pdfView.currentPage!) : 0) + 1
+        } else {
+            return
+        }
+        guard totalPages > 0 else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Go to Page"
+        alert.informativeText = "Enter page number (1 to \(totalPages)):"
+        let goButton = alert.addButton(withTitle: "Go")
+        alert.addButton(withTitle: "Cancel")
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 140, height: 24))
+        input.stringValue = "\(currentPage)"
+        input.alignment = .center
+        input.target = goButton
+        input.action = #selector(NSButton.performClick(_:))
+        alert.accessoryView = input
+        alert.window.initialFirstResponder = input
+
+        DispatchQueue.main.async {
+            input.selectText(nil)
+        }
+
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn,
+                  let self,
+                  let pageNum = Int(input.stringValue.trimmingCharacters(in: .whitespaces)) else { return }
+            self.jumpToPage(pageNum)
+        }
+    }
+
+    func jumpToPage(_ pageNumber: Int) {
+        let totalPages: Int
+        if let dviView, let doc = dviView.document {
+            totalPages = doc.pages.count
+        } else if let pdfView, let doc = pdfView.document {
+            totalPages = doc.pageCount
+        } else {
+            return
+        }
+        guard totalPages > 0 else { return }
+        let clampedPage = max(min(pageNumber, totalPages), 1)
+        let targetIndex = clampedPage - 1
+
+        if let dviView {
+            dviView.scrollToPage(index: targetIndex)
+            saveCurrentPage()
+            updateStatusForCurrentDocument()
+        } else if let pdfView, let doc = pdfView.document, let targetPage = doc.page(at: targetIndex) {
+            positionPDFViewAtTop(pdfView, page: targetPage)
+            saveCurrentPage()
+            updateStatusForCurrentDocument()
+        }
+    }
+
     private func setupContent() {
         guard let window else { return }
         let root = NSView()
@@ -242,11 +307,13 @@ final class DocumentWindowController: NSWindowController {
             let pageIndex = document.index(for: currentPage)
             if pageIndex >= 0 {
                 DocumentHistoryStore.setLastViewedPage(pageIndex, for: currentURL)
+                updateStatusForCurrentDocument()
             }
         } else if let dviView {
             let pageIndex = dviView.currentPageIndex
             if pageIndex >= 0 {
                 DocumentHistoryStore.setLastViewedPage(pageIndex, for: currentURL)
+                updateStatusForCurrentDocument()
             }
         }
     }
@@ -405,22 +472,39 @@ final class DocumentWindowController: NSWindowController {
     private func updateStatusForCurrentDocument() {
         guard let currentURL else { return }
         let zoom: CGFloat
-        if let pdfView {
+        let currentPage: Int
+        let totalPages: Int
+        if let pdfView, let doc = pdfView.document {
             zoom = pdfView.scaleFactor
+            totalPages = doc.pageCount
+            currentPage = (pdfView.currentPage != nil ? doc.index(for: pdfView.currentPage!) : 0) + 1
+        } else if let dviView, let doc = dviView.document {
+            zoom = dviView.zoom
+            totalPages = doc.pages.count
+            currentPage = dviView.currentPageIndex + 1
         } else {
-            zoom = dviView?.zoom ?? 1
+            zoom = 1.0
+            totalPages = 0
+            currentPage = 0
         }
-        statusField.stringValue = "\(currentURL.lastPathComponent) - \(Int((zoom * 100).rounded()))%"
+
+        var parts: [String] = []
+        if totalPages > 0 {
+            parts.append("Page \(currentPage) of \(totalPages)")
+        }
+        parts.append(currentURL.lastPathComponent)
+        parts.append("\(Int((zoom * 100).rounded()))%")
+        statusField.stringValue = parts.joined(separator: " - ")
     }
 }
 
 extension DocumentWindowController: NSToolbarDelegate {
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDocument, .flexibleSpace, .zoomOut, .actualSize, .zoomIn]
+        [.openDocument, .goToPage, .flexibleSpace, .zoomOut, .actualSize, .zoomIn]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDocument, .flexibleSpace, .zoomOut, .actualSize, .zoomIn]
+        [.openDocument, .goToPage, .flexibleSpace, .zoomOut, .actualSize, .zoomIn]
     }
 
     func toolbar(
@@ -438,6 +522,12 @@ extension DocumentWindowController: NSToolbarDelegate {
             item.toolTip = "Open a DVI, XDV, or PostScript file"
             item.image = NSImage(systemSymbolName: "doc.badge.plus", accessibilityDescription: "Open")
             item.action = #selector(openDocument(_:))
+        case .goToPage:
+            item.label = "Go to Page"
+            item.paletteLabel = "Go to Page"
+            item.toolTip = "Jump to page number (⌥⌘G or ⌘J)"
+            item.image = NSImage(systemSymbolName: "arrow.right.to.line", accessibilityDescription: "Go to page")
+            item.action = #selector(goToPage(_:))
         case .zoomOut:
             item.label = "Zoom Out"
             item.paletteLabel = "Zoom Out"
@@ -466,6 +556,7 @@ extension DocumentWindowController: NSToolbarDelegate {
 
 private extension NSToolbarItem.Identifier {
     static let openDocument = NSToolbarItem.Identifier("macDVI.toolbar.open")
+    static let goToPage = NSToolbarItem.Identifier("macDVI.toolbar.goToPage")
     static let zoomOut = NSToolbarItem.Identifier("macDVI.toolbar.zoomOut")
     static let actualSize = NSToolbarItem.Identifier("macDVI.toolbar.actualSize")
     static let zoomIn = NSToolbarItem.Identifier("macDVI.toolbar.zoomIn")

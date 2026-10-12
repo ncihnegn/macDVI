@@ -95,6 +95,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyController?.lastPage(sender)
     }
 
+    @objc func goToPage(_ sender: Any?) {
+        keyController?.goToPage(sender)
+    }
+
     private var keyController: DocumentWindowController? {
         guard let keyWindow = NSApp.keyWindow else {
             return controllers.last
@@ -184,8 +188,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         lastPageItem.target = self
 
+        let goToPageItem = NSMenuItem(title: "Go to Page…", action: #selector(goToPage(_:)), keyEquivalent: "g")
+        goToPageItem.keyEquivalentModifierMask = [.command, .option]
+        goToPageItem.target = self
+
+        let goToPageItemJ = NSMenuItem(title: "Go to Page…", action: #selector(goToPage(_:)), keyEquivalent: "j")
+        goToPageItemJ.keyEquivalentModifierMask = [.command]
+        goToPageItemJ.target = self
+        goToPageItemJ.isAlternate = true
+
         goMenu.addItem(nextItem)
         goMenu.addItem(prevItem)
+        goMenu.addItem(.separator())
+        goMenu.addItem(goToPageItem)
+        goMenu.addItem(goToPageItemJ)
         goMenu.addItem(.separator())
         goMenu.addItem(pageDownItem)
         goMenu.addItem(pageUpItem)
