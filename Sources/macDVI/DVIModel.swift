@@ -113,6 +113,26 @@ struct PostScriptInlineItem {
     let x: Double
     let y: Double
     let syncCurrentPoint: Bool
+
+    var hasVisualCommands: Bool {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed.hasPrefix("%") || trimmed.hasPrefix("SDict") {
+            return false
+        }
+        let drawingKeywords: Set<String> = [
+            "stroke", "fill", "eofill", "rectfill", "rectstroke", "shfill",
+            "show", "ashow", "widthshow", "awidthshow", "kshow",
+            "pgfstr", "pgffill", "pgfs", "pgfo", "pgfc", "pgf1", "pgf2", "pgf3",
+            "pgf4", "pgf5", "pgf6", "pgf7", "pgf8", "image", "colorimage", "arc", "arcn"
+        ]
+        let tokens = trimmed.split(whereSeparator: { $0.isWhitespace })
+        for token in tokens {
+            if drawingKeywords.contains(String(token)) {
+                return true
+            }
+        }
+        return false
+    }
 }
 
 struct PostScriptGraphicItem {

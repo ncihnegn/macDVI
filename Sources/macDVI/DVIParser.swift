@@ -93,7 +93,7 @@ final class DVIParser {
                 try reader.skip(Int(opcode - 132))
             case 137:
                 try reader.skip(8)
-            case 138, 140...142, 147, 152, 161:
+            case 138, 140...142, 147, 152, 161, 166:
                 continue
             case 139:
                 try reader.skip(44)
@@ -107,8 +107,8 @@ final class DVIParser {
                 try reader.skip(Int(opcode - 156))
             case 162...165:
                 try reader.skip(Int(opcode - 161))
-            case 166...170:
-                try reader.skip(Int(opcode - 165))
+            case 167...170:
+                try reader.skip(Int(opcode - 166))
             case 171...234:
                 continue
             case 235...238:
@@ -194,7 +194,11 @@ final class DVIParser {
                     y: state.y,
                     z: state.z,
                     transformOffsetX: state.transformOffsetX,
-                    transformOffsetY: state.transformOffsetY
+                    transformOffsetY: state.transformOffsetY,
+                    scaleX: state.scaleX,
+                    scaleY: state.scaleY,
+                    scaleOriginX: state.scaleOriginX,
+                    scaleOriginY: state.scaleOriginY
                 ))
             case 142:
                 guard let frame = state.stack.popLast() else {
@@ -208,6 +212,10 @@ final class DVIParser {
                 state.z = frame.z
                 state.transformOffsetX = frame.transformOffsetX
                 state.transformOffsetY = frame.transformOffsetY
+                state.scaleX = frame.scaleX
+                state.scaleY = frame.scaleY
+                state.scaleOriginX = frame.scaleOriginX
+                state.scaleOriginY = frame.scaleOriginY
             case 143...146:
                 state.h += try reader.readSigned(Int(opcode - 142))
             case 147:
@@ -266,7 +274,7 @@ final class DVIParser {
                         }
                         currentPage = page
                     }
-                    applySpecial(text, state: &state, at: opcodeOffset)
+                    applySpecial(text, state: &state, pointsPerDVIUnit: pointsPerDVIUnit, at: opcodeOffset)
                 }
             case 243...246:
                 let definition = try readFontDefinition(opcode: opcode, reader: &reader)
@@ -333,16 +341,17 @@ final class DVIParser {
             pointsPerDVIUnit: pointsPerDVIUnit
         )
         if page != nil {
-            let fontSize = fontSizePoints(fontNumber: fontNumber, pointsPerDVIUnit: pointsPerDVIUnit)
+            let baseFontSize = fontSizePoints(fontNumber: fontNumber, pointsPerDVIUnit: pointsPerDVIUnit)
+            let fontSize = baseFontSize * state.scaleY
             page?.add(.glyph(DVIGlyph(
                 fontNumber: fontNumber,
                 characterCode: characterCode,
                 x: effectiveX(state.h, pointsPerDVIUnit, state: state),
                 baselineY: effectiveY(state.v, pointsPerDVIUnit, state: state),
-                advance: Double(metric.widthDVIUnits) * pointsPerDVIUnit,
-                height: Double(metric.heightDVIUnits) * pointsPerDVIUnit,
-                depth: Double(metric.depthDVIUnits) * pointsPerDVIUnit,
-                italicCorrection: Double(metric.italicCorrectionDVIUnits) * pointsPerDVIUnit,
+                advance: Double(metric.widthDVIUnits) * pointsPerDVIUnit * state.scaleX,
+                height: Double(metric.heightDVIUnits) * pointsPerDVIUnit * state.scaleY,
+                depth: Double(metric.depthDVIUnits) * pointsPerDVIUnit * state.scaleY,
+                italicCorrection: Double(metric.italicCorrectionDVIUnits) * pointsPerDVIUnit * state.scaleX,
                 fontSize: fontSize,
                 color: state.currentColor
             )))
@@ -436,7 +445,11 @@ final class DVIParser {
                     y: state.y,
                     z: state.z,
                     transformOffsetX: state.transformOffsetX,
-                    transformOffsetY: state.transformOffsetY
+                    transformOffsetY: state.transformOffsetY,
+                    scaleX: state.scaleX,
+                    scaleY: state.scaleY,
+                    scaleOriginX: state.scaleOriginX,
+                    scaleOriginY: state.scaleOriginY
                 ))
             case 142:
                 guard let frame = state.stack.popLast() else {
@@ -450,6 +463,10 @@ final class DVIParser {
                 state.z = frame.z
                 state.transformOffsetX = frame.transformOffsetX
                 state.transformOffsetY = frame.transformOffsetY
+                state.scaleX = frame.scaleX
+                state.scaleY = frame.scaleY
+                state.scaleOriginX = frame.scaleOriginX
+                state.scaleOriginY = frame.scaleOriginY
             case 143...146:
                 state.h += try reader.readSigned(Int(opcode - 142))
             case 147:
@@ -552,8 +569,8 @@ final class DVIParser {
         pointsPerDVIUnit: Double
     ) {
         if height > 0, width > 0, page != nil {
-            let widthPoints = Double(width) * pointsPerDVIUnit
-            let heightPoints = Double(height) * pointsPerDVIUnit
+            let widthPoints = Double(width) * pointsPerDVIUnit * state.scaleX
+            let heightPoints = Double(height) * pointsPerDVIUnit * state.scaleY
             page?.add(.rule(DVIRule(
                 x: effectiveX(state.h, pointsPerDVIUnit, state: state),
                 y: effectiveY(state.v - height, pointsPerDVIUnit, state: state),
@@ -662,14 +679,41 @@ final class DVIParser {
     }
 
     private func effectiveX(_ dviUnits: Int64, _ pointsPerDVIUnit: Double, state: DVIState) -> Double {
-        xPoint(dviUnits, pointsPerDVIUnit) + state.transformOffsetX
+        let rawX = xPoint(dviUnits, pointsPerDVIUnit)
+        if state.scaleX != 1.0 {
+            return state.scaleOriginX + (rawX - state.scaleOriginX) * state.scaleX + state.transformOffsetX
+        }
+        return rawX + state.transformOffsetX
     }
 
     private func effectiveY(_ dviUnits: Int64, _ pointsPerDVIUnit: Double, state: DVIState) -> Double {
-        yPoint(dviUnits, pointsPerDVIUnit) + state.transformOffsetY
+        let rawY = yPoint(dviUnits, pointsPerDVIUnit)
+        if state.scaleY != 1.0 {
+            return state.scaleOriginY + (rawY - state.scaleOriginY) * state.scaleY + state.transformOffsetY
+        }
+        return rawY + state.transformOffsetY
     }
 
-    private func applySpecial(_ text: String, state: inout DVIState, at offset: Int) {
+    private func applySpecial(_ text: String, state: inout DVIState, pointsPerDVIUnit: Double, at offset: Int) {
+        if let scale = DVISpecialParser.postScriptCurrentpointScale(from: text) {
+            let curRawX = xPoint(state.h, pointsPerDVIUnit)
+            let curRawY = yPoint(state.v, pointsPerDVIUnit)
+            let newScaleX = state.scaleX * scale.sx
+            let newScaleY = state.scaleY * scale.sy
+
+            if abs(newScaleX - 1.0) < 0.001 && abs(newScaleY - 1.0) < 0.001 {
+                state.scaleX = 1.0
+                state.scaleY = 1.0
+                state.scaleOriginX = 0
+                state.scaleOriginY = 0
+            } else {
+                state.scaleX = newScaleX
+                state.scaleY = newScaleY
+                state.scaleOriginX = curRawX
+                state.scaleOriginY = curRawY
+            }
+        }
+
         if let concat = DVISpecialParser.postScriptConcat(from: text) {
             state.transformOffsetX += concat.tx
             // In PostScript, +ty is upwards; in DVI coordinate system, +y is downwards.
@@ -923,6 +967,10 @@ private struct DVIState {
     var z: Int64 = 0
     var transformOffsetX: Double = 0
     var transformOffsetY: Double = 0
+    var scaleX: Double = 1.0
+    var scaleY: Double = 1.0
+    var scaleOriginX: Double = 0
+    var scaleOriginY: Double = 0
     var currentFontNumber: Int?
     var currentColor: DVIColor = .black
     var colorStack: [DVIColor] = []
@@ -938,6 +986,10 @@ private struct DVIStackFrame {
     let z: Int64
     let transformOffsetX: Double
     let transformOffsetY: Double
+    let scaleX: Double
+    let scaleY: Double
+    let scaleOriginX: Double
+    let scaleOriginY: Double
 }
 
 private struct PageBuilder {
@@ -1157,6 +1209,48 @@ private enum DVISpecialParser {
             return nil
         }
         return (tx: tx, ty: ty)
+    }
+
+    /// Parses scale transformations from PostScript commands like
+    /// `currentpoint currentpoint translate sx sy scale neg exch neg exch translate`
+    /// or `currentpoint currentpoint translate 1 sx div 1 sy div scale neg exch neg exch translate`
+    static func postScriptCurrentpointScale(from text: String) -> (sx: Double, sy: Double)? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let s: String
+        if trimmed.hasPrefix("ps::") {
+            s = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if trimmed.hasPrefix("ps:") {
+            s = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            return nil
+        }
+
+        let tokens = s.split(whereSeparator: { $0.isWhitespace })
+        guard tokens.count >= 8,
+              tokens[0] == "currentpoint",
+              tokens[1] == "currentpoint",
+              tokens[2] == "translate",
+              let scaleIdx = tokens.firstIndex(of: "scale"),
+              scaleIdx > 3 else {
+            return nil
+        }
+
+        let args = Array(tokens[3..<scaleIdx])
+        if args.count == 2,
+           let sx = Double(args[0]),
+           let sy = Double(args[1]) {
+            return (sx: sx, sy: sy)
+        } else if args.count == 6,
+                  args[2] == "div",
+                  args[5] == "div",
+                  let numX = Double(args[0]),
+                  let denX = Double(args[1]), denX != 0,
+                  let numY = Double(args[3]),
+                  let denY = Double(args[4]), denY != 0 {
+            return (sx: numX / denX, sy: numY / denY)
+        }
+
+        return nil
     }
 
     static func colorCommand(from text: String) -> ColorCommand? {

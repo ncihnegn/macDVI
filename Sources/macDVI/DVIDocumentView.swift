@@ -5,6 +5,7 @@ final class DVIDocumentView: NSView {
         didSet {
             fontCache.removeAll()
             pageRenderCache.removeAllObjects()
+            pageRectsCache.removeAll()
             if let document {
                 type1FontProvider = Type1FontProvider(documentURL: document.url)
                 pkFontProvider = PKFontProvider(documentURL: document.url)
@@ -24,6 +25,7 @@ final class DVIDocumentView: NSView {
             zoom = min(max(zoom, 0.25), 5.0)
             fontCache.removeAll()
             pageRenderCache.removeAllObjects()
+            pageRectsCache.removeAll()
             updateFrameSize()
             needsDisplay = true
         }
@@ -37,6 +39,7 @@ final class DVIDocumentView: NSView {
     private let pageInset: CGFloat = 36
     private var fontCache: [FontCacheKey: NSFont] = [:]
     private let pageRenderCache = NSCache<NSString, NSImage>()
+    private var pageRectsCache: [NSRect] = []
     private var type1FontProvider: Type1FontProvider?
     private var pkFontProvider: PKFontProvider?
     private var gfFontProvider: GFFontProvider?
@@ -61,9 +64,11 @@ final class DVIDocumentView: NSView {
         dirtyRect.fill()
 
         guard let document else { return }
+        ensurePageRectsCached()
 
         for (index, page) in document.pages.enumerated() {
             let pageRect = rectForPage(at: index, page: page)
+            if pageRect.minY > dirtyRect.maxY { break }
             guard pageRect.intersects(dirtyRect) else { continue }
             drawPageBackground(in: pageRect)
             let img = pageImage(at: index, page: page, in: pageRect, document: document)
@@ -113,7 +118,7 @@ final class DVIDocumentView: NSView {
             guard case .psInline(let ps) = item else { return nil }
             return ps
         }
-        if !inlinePSItems.isEmpty {
+        if !inlinePSItems.isEmpty && inlinePSItems.contains(where: { $0.hasVisualCommands }) {
             let scale = max(window?.backingScaleFactor ?? 2.0, 1.0)
             let pixelWidth = UInt32(max(pageRect.width * scale, 1))
             let pixelHeight = UInt32(max(pageRect.height * scale, 1))
@@ -569,7 +574,8 @@ final class DVIDocumentView: NSView {
             return
         }
 
-        let maxPageWidth = document.pages.map { CGFloat($0.mediaBox.width) * zoom }.max() ?? 612
+        ensurePageRectsCached()
+        let maxPageWidth = pageRectsCache.map { $0.width }.max() ?? 612
         let totalPageHeight = document.pages
             .map { CGFloat($0.mediaBox.height) * zoom }
             .reduce(0, +)
@@ -581,19 +587,44 @@ final class DVIDocumentView: NSView {
 
         if abs(frame.width - targetSize.width) > 0.5 || abs(frame.height - targetSize.height) > 0.5 {
             setFrameSize(targetSize)
+            pageRectsCache.removeAll()
+            ensurePageRectsCached()
         }
     }
 
-    private func rectForPage(at index: Int, page: DVIPage) -> NSRect {
-        guard let document else { return .zero }
+    private func ensurePageRectsCached() {
+        guard let document else {
+            pageRectsCache.removeAll()
+            return
+        }
+        if pageRectsCache.count == document.pages.count {
+            return
+        }
+        var rects: [NSRect] = []
+        rects.reserveCapacity(document.pages.count)
         var y = pageInset
-        for previous in 0..<index {
-            y += CGFloat(document.pages[previous].mediaBox.height) * zoom + pageGap
+        for page in document.pages {
+            let width = CGFloat(page.mediaBox.width) * zoom
+            let height = CGFloat(page.mediaBox.height) * zoom
+            let x = max((bounds.width - width) / 2, pageInset)
+            rects.append(NSRect(x: x, y: y, width: width, height: height))
+            y += height + pageGap
+        }
+        pageRectsCache = rects
+    }
+
+    private func rectForPage(at index: Int, page: DVIPage) -> NSRect {
+        if index < pageRectsCache.count {
+            return pageRectsCache[index]
+        }
+        ensurePageRectsCached()
+        if index < pageRectsCache.count {
+            return pageRectsCache[index]
         }
         let width = CGFloat(page.mediaBox.width) * zoom
         let height = CGFloat(page.mediaBox.height) * zoom
         let x = max((bounds.width - width) / 2, pageInset)
-        return NSRect(x: x, y: y, width: width, height: height)
+        return NSRect(x: x, y: pageInset, width: width, height: height)
     }
 
     // MARK: - Responder & Keyboard / Navigation
