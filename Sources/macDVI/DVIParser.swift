@@ -389,6 +389,10 @@ final class DVIParser {
         localState.v = state.v
         localState.transformOffsetX = state.transformOffsetX
         localState.transformOffsetY = state.transformOffsetY
+        localState.scaleX = state.scaleX
+        localState.scaleY = state.scaleY
+        localState.scaleOriginX = state.scaleOriginX
+        localState.scaleOriginY = state.scaleOriginY
         localState.currentColor = state.currentColor
         localState.colorStack = state.colorStack
         if let firstLocal = virtualFont.localFonts.first,
