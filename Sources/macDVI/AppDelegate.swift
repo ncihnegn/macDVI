@@ -34,10 +34,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func openDocument(at url: URL) {
+        if let emptyController = controllers.first(where: { $0.currentURL == nil }) {
+            emptyController.window?.makeKeyAndOrderFront(nil)
+            emptyController.openDocument(url: url)
+        } else {
+            newWindow(opening: url)
+        }
+    }
+
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
         let url = URL(fileURLWithPath: filename)
         if NSApp.isRunning {
-            newWindow(opening: url)
+            openDocument(at: url)
         } else {
             pendingFileURLs.append(url)
         }
@@ -47,16 +56,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         if NSApp.isRunning {
             for url in urls {
-                newWindow(opening: url)
+                openDocument(at: url)
             }
         } else {
             pendingFileURLs.append(contentsOf: urls)
         }
     }
 
+    @objc func openRecentDocumentItem(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        openDocument(at: url)
+    }
+
+    @objc func clearRecentDocuments(_ sender: Any?) {
+        NSDocumentController.shared.clearRecentDocuments(sender)
+    }
+
     @objc func openDocument(_ sender: Any?) {
-        let controller = newWindow(opening: nil)
-        controller.openDocument(sender)
+        if let emptyController = controllers.first(where: { $0.currentURL == nil }) {
+            emptyController.window?.makeKeyAndOrderFront(nil)
+            emptyController.openDocument(sender)
+        } else {
+            let controller = newWindow(opening: nil)
+            controller.openDocument(sender)
+        }
     }
 
     @objc func zoomIn(_ sender: Any?) {
@@ -131,9 +154,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let fileItem = NSMenuItem()
         let fileMenu = NSMenu(title: "File")
-        let openItem = NSMenuItem(title: "Open...", action: #selector(openDocument(_:)), keyEquivalent: "o")
+        let openItem = NSMenuItem(title: "Open…", action: #selector(openDocument(_:)), keyEquivalent: "o")
         openItem.target = self
         fileMenu.addItem(openItem)
+
+        let openRecentItem = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+        let openRecentMenu = NSMenu(title: "Open Recent")
+        openRecentMenu.delegate = self
+        populateRecentDocumentsMenu(openRecentMenu)
+        openRecentItem.submenu = openRecentMenu
+        fileMenu.addItem(openRecentItem)
+
+        fileMenu.addItem(.separator())
         fileMenu.addItem(NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
         fileItem.submenu = fileMenu
         mainMenu.addItem(fileItem)
@@ -213,6 +245,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(goItem)
 
         NSApp.mainMenu = mainMenu
+    }
+
+    private func populateRecentDocumentsMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let recentURLs = NSDocumentController.shared.recentDocumentURLs
+        for url in recentURLs {
+            let item = NSMenuItem(
+                title: url.lastPathComponent,
+                action: #selector(openRecentDocumentItem(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = url
+            item.toolTip = url.path
+            let icon = NSWorkspace.shared.icon(forFile: url.path)
+            icon.size = NSSize(width: 16, height: 16)
+            item.image = icon
+            menu.addItem(item)
+        }
+        if !recentURLs.isEmpty {
+            menu.addItem(.separator())
+        }
+        let clearItem = NSMenuItem(
+            title: "Clear Menu",
+            action: #selector(clearRecentDocuments(_:)),
+            keyEquivalent: ""
+        )
+        clearItem.target = self
+        clearItem.isEnabled = !recentURLs.isEmpty
+        menu.addItem(clearItem)
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu.title == "Open Recent" {
+            populateRecentDocumentsMenu(menu)
+        }
     }
 }
 

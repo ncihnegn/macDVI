@@ -7,7 +7,7 @@ final class DocumentWindowController: NSWindowController {
     private let statusField = NSTextField(labelWithString: "Open a document")
     private var pdfView: PDFView?
     private var dviView: DVIDocumentView?
-    private var currentURL: URL?
+    private(set) var currentURL: URL?
     private var pdfPageChangeObserver: NSObjectProtocol?
     private var scrollViewBoundsObserver: NSObjectProtocol?
     private var isRestoringPage = false
@@ -234,15 +234,19 @@ final class DocumentWindowController: NSWindowController {
     private func handleLoadResult(_ result: Result<DVIDocumentLoadResult, Error>, url: URL) {
         switch result {
         case .success(.pdf(let conversion)):
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
             showPDF(url: conversion.pdfURL)
             statusField.stringValue = "Rendered \(url.lastPathComponent) with \(conversion.converterName)"
+            updateStatusForCurrentDocument()
         case .success(.native(let document)):
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
             showNative(document: document)
             var status = "Rendered \(url.lastPathComponent) with native renderer"
             if !document.warnings.isEmpty {
                 status += " - \(document.warnings.count) warning(s)"
             }
             statusField.stringValue = status
+            updateStatusForCurrentDocument()
         case .failure(let error):
             showError(error)
         }
