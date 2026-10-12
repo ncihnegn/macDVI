@@ -1,4 +1,4 @@
 module CPostScript [system] {
-    header "postscript.h"
+    header "include/postscript.h"
     export *
 }

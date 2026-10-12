@@ -1,6 +1,13 @@
 // swift-tools-version: 5.9
 
+import Foundation
 import PackageDescription
+
+let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+let postscriptLibraryDirectory = packageRoot
+    .deletingLastPathComponent()
+    .appendingPathComponent("postscript/target/release")
+let postscriptStaticLibrary = postscriptLibraryDirectory.appendingPathComponent("libpostscript.a")
 
 let package = Package(
     name: "macDVI",
@@ -11,9 +18,8 @@ let package = Package(
         .executable(name: "macDVI", targets: ["macDVI"])
     ],
     targets: [
-        .target(
+        .systemLibrary(
             name: "CPostScript",
-            dependencies: [],
             path: "Sources/CPostScript"
         ),
         .executableTarget(
@@ -21,8 +27,10 @@ let package = Package(
             dependencies: ["CPostScript"],
             linkerSettings: [
                 .unsafeFlags([
-                    "-L/Users/ningchen/Temp/postscript/target/release",
-                    "-lpostscript"
+                    "-Xlinker",
+                    "-force_load",
+                    "-Xlinker",
+                    postscriptStaticLibrary.path
                 ])
             ]
         )

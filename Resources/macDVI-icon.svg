@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17234C"/>
+      <stop offset="0.52" stop-color="#243B7A"/>
+      <stop offset="1" stop-color="#101A3A"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="22%" r="72%">
+      <stop offset="0" stop-color="#6D87D5" stop-opacity="0.42"/>
+      <stop offset="0.62" stop-color="#415BA7" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#101A3A" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFDF7"/>
+      <stop offset="0.7" stop-color="#F4F1E8"/>
+      <stop offset="1" stop-color="#DDDCD7"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E8E7E0"/>
+      <stop offset="1" stop-color="#C9C9C6"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="24"/>
+      <feOffset dx="0" dy="24" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.32"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="12"/>
+      <feOffset dx="0" dy="10"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.34"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="icon-shape">
+      <rect x="24" y="24" width="976" height="976" rx="222"/>
+    </clipPath>
+  </defs>
+
+  <rect x="24" y="24" width="976" height="976" rx="222" fill="url(#background)"/>
+  <g clip-path="url(#icon-shape)">
+    <rect x="24" y="24" width="976" height="976" fill="url(#glow)"/>
+    <path d="M-80 820C180 570 350 590 590 345C740 192 858 151 1100 132V1100H-80Z"
+          fill="#0D1634" opacity="0.18"/>
+    <path d="M-45 175C210 20 448 66 570 168C680 260 820 280 1080 250"
+          fill="none" stroke="#AFC1FF" stroke-width="4" opacity="0.12"/>
+  </g>
+
+  <!-- Bookmark peeking from behind the page. -->
+  <path d="M721 272H829V852L775 814L721 852Z" fill="#E56D68" filter="url(#soft-shadow)"/>
+  <path d="M721 272H829V327H721Z" fill="#F18A78" opacity="0.72"/>
+
+  <!-- Rendered page. -->
+  <path d="M241 168C241 144 260 125 284 125H647L792 270V839C792 863 773 882 749 882H284C260 882 241 863 241 839Z"
+        fill="url(#paper)" filter="url(#shadow)"/>
+  <path d="M647 125V245C647 260 659 272 674 272H792Z" fill="url(#fold)"/>
+  <path d="M647 125L792 272H674C659 272 647 260 647 245Z" fill="#FFFDF7" opacity="0.76"/>
+
+  <!-- Typeset text lines. -->
+  <rect x="316" y="340" width="266" height="18" rx="9" fill="#26304A" opacity="0.85"/>
+  <rect x="316" y="384" width="347" height="14" rx="7" fill="#596174" opacity="0.48"/>
+  <rect x="316" y="418" width="295" height="14" rx="7" fill="#596174" opacity="0.48"/>
+  <rect x="316" y="452" width="204" height="14" rx="7" fill="#596174" opacity="0.48"/>
+
+  <!-- TeX-like mathematical glyph, kept abstract and legible at small sizes. -->
+  <path d="M345 653C374 570 410 519 445 519C477 519 468 577 452 621C435 669 431 710 462 710C493 710 534 647 565 576"
+        fill="none" stroke="#168F9A" stroke-width="25" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M499 519L604 519" fill="none" stroke="#168F9A" stroke-width="25" stroke-linecap="round"/>
+  <path d="M518 519L477 710" fill="none" stroke="#168F9A" stroke-width="25" stroke-linecap="round"/>
+  <circle cx="625" cy="697" r="13" fill="#E56D68"/>
+
+  <!-- Small page baseline. -->
+  <rect x="316" y="781" width="176" height="12" rx="6" fill="#596174" opacity="0.36"/>
+  <rect x="510" y="781" width="102" height="12" rx="6" fill="#596174" opacity="0.24"/>
+</svg>

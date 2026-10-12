@@ -6,6 +6,7 @@ APP="$ROOT/build/macDVI.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
+ICON="$ROOT/Resources/macDVI.icns"
 
 cd "$ROOT"
 if [ -d "$ROOT/../postscript" ]; then
@@ -16,6 +17,7 @@ swift build -c release
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RESOURCES"
 cp ".build/release/macDVI" "$MACOS/macDVI"
+cp "$ICON" "$RESOURCES/macDVI.icns"
 
 cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -39,6 +41,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>CFBundleIconFile</key>
+    <string>macDVI</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
