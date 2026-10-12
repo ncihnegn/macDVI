@@ -8,6 +8,9 @@ final class DocumentWindowController: NSWindowController {
     private var pdfView: PDFView?
     private var dviView: DVIDocumentView?
     private var currentURL: URL?
+    private var pdfPageChangeObserver: NSObjectProtocol?
+    private var scrollViewBoundsObserver: NSObjectProtocol?
+    private var isRestoringPage = false
 
     init() {
         let window = NSWindow(
@@ -30,6 +33,7 @@ final class DocumentWindowController: NSWindowController {
     }
 
     func openDocument(url: URL) {
+        saveCurrentPage()
         currentURL = url
         window?.title = url.lastPathComponent
         showLoading(message: "Opening \(url.lastPathComponent)...")
@@ -217,7 +221,38 @@ final class DocumentWindowController: NSWindowController {
         statusField.stringValue = message
     }
 
+    deinit {
+        cleanUpObservers()
+    }
+
+    private func cleanUpObservers() {
+        if let observer = pdfPageChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            pdfPageChangeObserver = nil
+        }
+        if let observer = scrollViewBoundsObserver {
+            NotificationCenter.default.removeObserver(observer)
+            scrollViewBoundsObserver = nil
+        }
+    }
+
+    func saveCurrentPage() {
+        guard let currentURL, !isRestoringPage else { return }
+        if let pdfView, let document = pdfView.document, let currentPage = pdfView.currentPage {
+            let pageIndex = document.index(for: currentPage)
+            if pageIndex >= 0 {
+                DocumentHistoryStore.setLastViewedPage(pageIndex, for: currentURL)
+            }
+        } else if let dviView {
+            let pageIndex = dviView.currentPageIndex
+            if pageIndex >= 0 {
+                DocumentHistoryStore.setLastViewedPage(pageIndex, for: currentURL)
+            }
+        }
+    }
+
     private func showPDF(url: URL) {
+        cleanUpObservers()
         pdfView = PDFView()
         dviView = nil
         guard let pdfView else { return }
@@ -230,12 +265,33 @@ final class DocumentWindowController: NSWindowController {
         pdfView.document = document
         replaceContent(with: pdfView)
         pinToContainer(pdfView)
-        if let firstPage = document?.page(at: 0) {
-            positionPDFViewAtTop(pdfView, page: firstPage)
+
+        let targetIndex: Int
+        if let saved = DocumentHistoryStore.lastViewedPage(for: url),
+           let count = document?.pageCount, saved >= 0 && saved < count {
+            targetIndex = saved
+        } else {
+            targetIndex = 0
+        }
+
+        if let targetPage = document?.page(at: targetIndex) {
+            isRestoringPage = true
+            positionPDFViewAtTop(pdfView, page: targetPage)
             DispatchQueue.main.async { [weak self, weak pdfView] in
                 guard let self, let pdfView else { return }
-                self.positionPDFViewAtTop(pdfView, page: firstPage)
+                self.positionPDFViewAtTop(pdfView, page: targetPage)
+                DispatchQueue.main.async { [weak self] in
+                    self?.isRestoringPage = false
+                }
             }
+        }
+
+        pdfPageChangeObserver = NotificationCenter.default.addObserver(
+            forName: .PDFViewPageChanged,
+            object: pdfView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.saveCurrentPage()
         }
     }
 
@@ -252,6 +308,7 @@ final class DocumentWindowController: NSWindowController {
     }
 
     private func showNative(document: DVIDocument) {
+        cleanUpObservers()
         pdfView = nil
 
         let scrollView = NSScrollView()
@@ -270,6 +327,34 @@ final class DocumentWindowController: NSWindowController {
         replaceContent(with: scrollView)
         pinToContainer(scrollView)
         window?.makeFirstResponder(dviView)
+
+        let targetIndex: Int
+        if let saved = DocumentHistoryStore.lastViewedPage(for: document.url),
+           saved >= 0 && saved < document.pages.count {
+            targetIndex = saved
+        } else {
+            targetIndex = 0
+        }
+
+        if targetIndex > 0 {
+            isRestoringPage = true
+            DispatchQueue.main.async { [weak self, weak dviView] in
+                guard let self, let dviView else { return }
+                dviView.scrollToPage(index: targetIndex)
+                DispatchQueue.main.async { [weak self] in
+                    self?.isRestoringPage = false
+                }
+            }
+        }
+
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        scrollViewBoundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.saveCurrentPage()
+        }
     }
 
     private func showError(_ error: Error) {

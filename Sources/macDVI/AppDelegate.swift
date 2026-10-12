@@ -28,6 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        for controller in controllers {
+            controller.saveCurrentPage()
+        }
+    }
+
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
         let url = URL(fileURLWithPath: filename)
         if NSApp.isRunning {
@@ -197,6 +203,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
+        if let controller = controllers.first(where: { $0.window === window }) {
+            controller.saveCurrentPage()
+        }
         controllers.removeAll { $0.window === window }
     }
 }
