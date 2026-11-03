@@ -1,4 +1,5 @@
 import Foundation
+import PDFKit
 
 enum DVIDocumentLoadResult {
     case pdf(PDFConversion)
@@ -12,12 +13,22 @@ struct PDFConversion {
 }
 
 struct DVIDocumentLoadError: LocalizedError {
+    let message: String?
     let nativeMessage: String
     let conversionMessage: String
 
+    init(message: String? = nil, nativeMessage: String, conversionMessage: String) {
+        self.message = message
+        self.nativeMessage = nativeMessage
+        self.conversionMessage = conversionMessage
+    }
+
     var errorDescription: String? {
-        """
-        Could not open the DVI file.
+        if let message {
+            return message
+        }
+        return """
+        Could not open the document.
 
         Native renderer: \(nativeMessage)
 
@@ -27,7 +38,54 @@ struct DVIDocumentLoadError: LocalizedError {
 }
 
 enum DVIDocumentLoader {
+    static func isPDF(url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        if ext == "pdf" {
+            return true
+        }
+
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
+            return false
+        }
+
+        let prefix = Array(data.prefix(1024))
+        var start = 0
+        if prefix.starts(with: [0xEF, 0xBB, 0xBF]) {
+            start = 3
+        }
+        while start < prefix.count, prefix[start] == 0x09 || prefix[start] == 0x0A ||
+                prefix[start] == 0x0C || prefix[start] == 0x0D || prefix[start] == 0x20 {
+            start += 1
+        }
+        return prefix.dropFirst(start).starts(with: [0x25, 0x50, 0x44, 0x46, 0x2D]) // %PDF-
+    }
+
     static func load(url: URL) throws -> DVIDocumentLoadResult {
+        if isPDF(url: url) {
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw DVIDocumentLoadError(
+                    message: "Could not open \(url.lastPathComponent): file does not exist.",
+                    nativeMessage: "File does not exist: \(url.path)",
+                    conversionMessage: "No conversion available for PDF"
+                )
+            }
+            guard let document = PDFDocument(url: url) else {
+                throw DVIDocumentLoadError(
+                    message: "Could not open \(url.lastPathComponent): invalid or corrupted PDF file.",
+                    nativeMessage: "Invalid or corrupted PDF file.",
+                    conversionMessage: "No conversion available for PDF"
+                )
+            }
+            guard document.pageCount > 0 else {
+                throw DVIDocumentLoadError(
+                    message: "Could not open \(url.lastPathComponent): PDF document contains no pages.",
+                    nativeMessage: "PDF document contains no pages.",
+                    conversionMessage: "No conversion available for PDF"
+                )
+            }
+            return .pdf(PDFConversion(pdfURL: url, converterName: "PDFKit", log: ""))
+        }
+
         let ext = url.pathExtension.lowercased()
 
         switch ext {

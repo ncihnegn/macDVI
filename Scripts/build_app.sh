@@ -86,6 +86,18 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
             <key>LSHandlerRank</key>
             <string>Owner</string>
         </dict>
+        <dict>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>pdf</string>
+            </array>
+            <key>CFBundleTypeName</key>
+            <string>PDF Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+        </dict>
     </array>
 </dict>
 </plist>

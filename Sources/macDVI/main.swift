@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import PDFKit
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 
@@ -7,12 +8,46 @@ if let inspectIndex = arguments.firstIndex(of: "--inspect") {
     var inspectArguments = arguments
     inspectArguments.remove(at: inspectIndex)
     guard let path = inspectArguments.first else {
-        FileHandle.standardError.write(Data("usage: macDVI --inspect path/to/file.dvi\n".utf8))
+        FileHandle.standardError.write(Data("usage: macDVI --inspect path/to/file\n".utf8))
         exit(64)
     }
 
     do {
         let url = URL(fileURLWithPath: path)
+        if DVIDocumentLoader.isPDF(url: url) {
+            guard let pdfDoc = PDFDocument(url: url) else {
+                FileHandle.standardError.write(Data("Could not open PDF file at \(url.path)\n".utf8))
+                exit(1)
+            }
+            print("PDF: \(url.lastPathComponent)")
+            print("Pages: \(pdfDoc.pageCount)")
+            if pdfDoc.isEncrypted {
+                print("Encrypted: \(pdfDoc.isEncrypted)")
+            }
+            if pdfDoc.isLocked {
+                print("Locked: \(pdfDoc.isLocked)")
+            }
+            if let attributes = pdfDoc.documentAttributes {
+                if let title = attributes[PDFDocumentAttribute.titleAttribute] as? String, !title.isEmpty {
+                    print("Title: \(title)")
+                }
+                if let author = attributes[PDFDocumentAttribute.authorAttribute] as? String, !author.isEmpty {
+                    print("Author: \(author)")
+                }
+                if let creator = attributes[PDFDocumentAttribute.creatorAttribute] as? String, !creator.isEmpty {
+                    print("Creator: \(creator)")
+                }
+                if let producer = attributes[PDFDocumentAttribute.producerAttribute] as? String, !producer.isEmpty {
+                    print("Producer: \(producer)")
+                }
+            }
+            if let firstPage = pdfDoc.page(at: 0) {
+                let bounds = firstPage.bounds(for: .mediaBox)
+                print("Page 1 size: \(bounds.width) x \(bounds.height) pt")
+            }
+            exit(0)
+        }
+
         let document = try DVIParser(url: url).parse()
         print("DVI: \(url.lastPathComponent)")
         print("Pages: \(document.pages.count)")
@@ -63,13 +98,37 @@ if let renderIndex = arguments.firstIndex(of: "--render-page") {
     renderArgs.remove(at: renderIndex)
     guard renderArgs.count >= 3,
           let pageNum = Int(renderArgs[1]) else {
-        FileHandle.standardError.write(Data("usage: macDVI --render-page file.dvi <pageNumber> <out.png>\n".utf8))
+        FileHandle.standardError.write(Data("usage: macDVI --render-page file <pageNumber> <out.png>\n".utf8))
         exit(64)
     }
-    let dviURL = URL(fileURLWithPath: renderArgs[0])
+    let docURL = URL(fileURLWithPath: renderArgs[0])
     let outURL = URL(fileURLWithPath: renderArgs[2])
     do {
-        let doc = try DVIParser(url: dviURL).parse()
+        if DVIDocumentLoader.isPDF(url: docURL) {
+            guard let pdfDoc = PDFDocument(url: docURL) else {
+                FileHandle.standardError.write(Data("could not open PDF file\n".utf8))
+                exit(1)
+            }
+            guard pageNum >= 1, pageNum <= pdfDoc.pageCount else {
+                FileHandle.standardError.write(Data("page out of bounds\n".utf8))
+                exit(1)
+            }
+            guard let page = pdfDoc.page(at: pageNum - 1) else {
+                FileHandle.standardError.write(Data("could not get page\n".utf8))
+                exit(1)
+            }
+            let pageRect = page.bounds(for: .mediaBox)
+            let img = page.thumbnail(of: pageRect.size, for: .mediaBox)
+            if let tiff = img.tiffRepresentation,
+               let rep = NSBitmapImageRep(data: tiff),
+               let png = rep.representation(using: NSBitmapImageRep.FileType.png, properties: [:]) {
+                try png.write(to: outURL)
+                print("Rendered page \(pageNum) to \(outURL.path)")
+            }
+            exit(0)
+        }
+
+        let doc = try DVIParser(url: docURL).parse()
         guard pageNum >= 1, pageNum <= doc.pages.count else {
             FileHandle.standardError.write(Data("page out of bounds\n".utf8))
             exit(1)

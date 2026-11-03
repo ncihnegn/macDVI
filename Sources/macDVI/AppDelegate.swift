@@ -170,6 +170,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fileItem.submenu = fileMenu
         mainMenu.addItem(fileItem)
 
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+
         let viewItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
         let zoomInItem = NSMenuItem(title: "Zoom In", action: #selector(zoomIn(_:)), keyEquivalent: "+")

@@ -9,6 +9,7 @@ final class DocumentWindowController: NSWindowController {
     private var dviView: DVIDocumentView?
     private(set) var currentURL: URL?
     private var pdfPageChangeObserver: NSObjectProtocol?
+    private var pdfScaleChangeObserver: NSObjectProtocol?
     private var scrollViewBoundsObserver: NSObjectProtocol?
     private var isRestoringPage = false
 
@@ -48,7 +49,7 @@ final class DocumentWindowController: NSWindowController {
 
     @objc func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = ["dvi", "xdv", "ps", "eps"].compactMap {
+        panel.allowedContentTypes = ["dvi", "xdv", "ps", "eps", "pdf"].compactMap {
             UTType(filenameExtension: $0)
         }
         panel.allowsMultipleSelection = false
@@ -69,6 +70,7 @@ final class DocumentWindowController: NSWindowController {
 
     @objc func actualSize(_ sender: Any?) {
         if let pdfView {
+            pdfView.autoScales = false
             pdfView.scaleFactor = 1.0
         }
         if let dviView {
@@ -253,7 +255,7 @@ final class DocumentWindowController: NSWindowController {
     }
 
     private func showPlaceholder() {
-        let label = NSTextField(labelWithString: "Open a DVI, XDV, or PostScript file")
+        let label = NSTextField(labelWithString: "Open a DVI, XDV, PostScript, or PDF file")
         label.font = NSFont.systemFont(ofSize: 18, weight: .medium)
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -299,6 +301,10 @@ final class DocumentWindowController: NSWindowController {
             NotificationCenter.default.removeObserver(observer)
             pdfPageChangeObserver = nil
         }
+        if let observer = pdfScaleChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            pdfScaleChangeObserver = nil
+        }
         if let observer = scrollViewBoundsObserver {
             NotificationCenter.default.removeObserver(observer)
             scrollViewBoundsObserver = nil
@@ -336,9 +342,10 @@ final class DocumentWindowController: NSWindowController {
         pdfView.document = document
         replaceContent(with: pdfView)
         pinToContainer(pdfView)
+        window?.makeFirstResponder(pdfView)
 
         let targetIndex: Int
-        if let saved = DocumentHistoryStore.lastViewedPage(for: url),
+        if let saved = DocumentHistoryStore.lastViewedPage(for: currentURL ?? url),
            let count = document?.pageCount, saved >= 0 && saved < count {
             targetIndex = saved
         } else {
@@ -363,6 +370,14 @@ final class DocumentWindowController: NSWindowController {
             queue: .main
         ) { [weak self] _ in
             self?.saveCurrentPage()
+        }
+
+        pdfScaleChangeObserver = NotificationCenter.default.addObserver(
+            forName: .PDFViewScaleChanged,
+            object: pdfView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateStatusForCurrentDocument()
         }
     }
 
@@ -523,7 +538,7 @@ extension DocumentWindowController: NSToolbarDelegate {
         case .openDocument:
             item.label = "Open"
             item.paletteLabel = "Open Document"
-            item.toolTip = "Open a DVI, XDV, or PostScript file"
+            item.toolTip = "Open a DVI, XDV, PostScript, or PDF file"
             item.image = NSImage(systemSymbolName: "doc.badge.plus", accessibilityDescription: "Open")
             item.action = #selector(openDocument(_:))
         case .goToPage:
