@@ -31,6 +31,22 @@ final class DVIDocumentView: NSView {
         }
     }
 
+    var isTwoPageView: Bool = false {
+        didSet {
+            guard oldValue != isTwoPageView else { return }
+            pageRectsCache.removeAll()
+            updateFrameSize()
+            needsDisplay = true
+        }
+    }
+
+    var autoScales: Bool = false {
+        didSet {
+            guard autoScales else { return }
+            applyZoomToFit()
+        }
+    }
+
     override var isFlipped: Bool {
         true
     }
@@ -69,7 +85,13 @@ final class DVIDocumentView: NSView {
 
         for (index, page) in document.pages.enumerated() {
             let pageRect = rectForPage(at: index, page: page)
-            if pageRect.minY > dirtyRect.maxY { break }
+            if isTwoPageView {
+                if index % 2 == 1 || index == document.pages.count - 1 {
+                    if pageRect.minY > dirtyRect.maxY { break }
+                }
+            } else {
+                if pageRect.minY > dirtyRect.maxY { break }
+            }
             guard pageRect.intersects(dirtyRect) else { continue }
             drawPageBackground(in: pageRect)
             let img = pageImage(at: index, page: page, in: pageRect, document: document)
@@ -568,6 +590,52 @@ final class DVIDocumentView: NSView {
         return font
     }
 
+    private var isApplyingZoomToFit = false
+
+    func applyZoomToFit() {
+        guard !isApplyingZoomToFit else { return }
+        guard let document, !document.pages.isEmpty else { return }
+        let clipWidth = enclosingScrollView?.contentView.bounds.width ?? bounds.width
+        let clipHeight = enclosingScrollView?.contentView.bounds.height ?? bounds.height
+        let availableWidth = max(clipWidth - pageInset * 2, 100)
+        let availableHeight = max(clipHeight - pageInset * 2, 100)
+
+        let targetPage = document.pages[min(currentPageIndex, document.pages.count - 1)]
+        let pageWidth: CGFloat
+        let pageHeight: CGFloat
+
+        if isTwoPageView {
+            let leftW = CGFloat(targetPage.mediaBox.width)
+            let leftH = CGFloat(targetPage.mediaBox.height)
+            let nextIdx = (currentPageIndex - (currentPageIndex % 2)) + 1
+            if nextIdx < document.pages.count {
+                let rightPage = document.pages[nextIdx]
+                let rightW = CGFloat(rightPage.mediaBox.width)
+                let rightH = CGFloat(rightPage.mediaBox.height)
+                pageWidth = leftW + rightW + pageGap
+                pageHeight = max(leftH, rightH)
+            } else {
+                pageWidth = leftW
+                pageHeight = leftH
+            }
+        } else {
+            pageWidth = CGFloat(targetPage.mediaBox.width)
+            pageHeight = CGFloat(targetPage.mediaBox.height)
+        }
+
+        guard pageWidth > 0, pageHeight > 0 else { return }
+        let scaleW = availableWidth / pageWidth
+        let scaleH = availableHeight / pageHeight
+        let targetZoom = min(scaleW, scaleH)
+        let clampedZoom = min(max(targetZoom, 0.25), 5.0)
+
+        if abs(zoom - clampedZoom) > 0.001 {
+            isApplyingZoomToFit = true
+            zoom = clampedZoom
+            isApplyingZoomToFit = false
+        }
+    }
+
     private func updateFrameSize() {
         let clipWidth = enclosingScrollView?.contentView.bounds.width ?? 900
         guard let document, !document.pages.isEmpty else {
@@ -575,15 +643,49 @@ final class DVIDocumentView: NSView {
             return
         }
 
+        if autoScales {
+            applyZoomToFit()
+        }
+
         ensurePageRectsCached()
-        let maxPageWidth = pageRectsCache.map { $0.width }.max() ?? 612
-        let totalPageHeight = document.pages
-            .map { CGFloat($0.mediaBox.height) * zoom }
-            .reduce(0, +)
-        let totalGap = pageGap * CGFloat(max(document.pages.count - 1, 0))
+        let maxPageWidth: CGFloat
+        let totalContentHeight: CGFloat
+
+        if isTwoPageView {
+            var maxRowWidth: CGFloat = 0
+            var totalHeight: CGFloat = pageInset
+            let count = document.pages.count
+            var i = 0
+            while i < count {
+                let w1 = CGFloat(document.pages[i].mediaBox.width) * zoom
+                let h1 = CGFloat(document.pages[i].mediaBox.height) * zoom
+                if i + 1 < count {
+                    let w2 = CGFloat(document.pages[i + 1].mediaBox.width) * zoom
+                    let h2 = CGFloat(document.pages[i + 1].mediaBox.height) * zoom
+                    let rowW = w1 + pageGap + w2
+                    maxRowWidth = max(maxRowWidth, rowW)
+                    totalHeight += max(h1, h2) + pageGap
+                    i += 2
+                } else {
+                    maxRowWidth = max(maxRowWidth, w1)
+                    totalHeight += h1 + pageGap
+                    i += 1
+                }
+            }
+            maxPageWidth = maxRowWidth
+            totalContentHeight = totalHeight - pageGap + pageInset
+        } else {
+            maxPageWidth = pageRectsCache.map { $0.width }.max() ?? 612
+            let totalPageHeight = document.pages
+                .map { CGFloat($0.mediaBox.height) * zoom }
+                .reduce(0, +)
+            let totalGap = pageGap * CGFloat(max(document.pages.count - 1, 0))
+            totalContentHeight = totalPageHeight + totalGap + pageInset * 2
+        }
+
         let targetSize = CGSize(
             width: max(clipWidth, maxPageWidth + pageInset * 2),
-            height: totalPageHeight + totalGap + pageInset * 2
+            height: max(totalContentHeight, 600)
         )
 
         if abs(frame.width - targetSize.width) > 0.5 || abs(frame.height - targetSize.height) > 0.5 {
@@ -603,13 +705,62 @@ final class DVIDocumentView: NSView {
         }
         var rects: [NSRect] = []
         rects.reserveCapacity(document.pages.count)
-        var y = pageInset
-        for page in document.pages {
-            let width = CGFloat(page.mediaBox.width) * zoom
-            let height = CGFloat(page.mediaBox.height) * zoom
-            let x = max((bounds.width - width) / 2, pageInset)
-            rects.append(NSRect(x: x, y: y, width: width, height: height))
-            y += height + pageGap
+
+        if isTwoPageView {
+            let count = document.pages.count
+            var rowDimensions: [(width: CGFloat, height: CGFloat, leftW: CGFloat, leftH: CGFloat, rightW: CGFloat, rightH: CGFloat)] = []
+            var maxRowWidth: CGFloat = 0
+            var i = 0
+            while i < count {
+                let leftPage = document.pages[i]
+                let w1 = CGFloat(leftPage.mediaBox.width) * zoom
+                let h1 = CGFloat(leftPage.mediaBox.height) * zoom
+                if i + 1 < count {
+                    let rightPage = document.pages[i + 1]
+                    let w2 = CGFloat(rightPage.mediaBox.width) * zoom
+                    let h2 = CGFloat(rightPage.mediaBox.height) * zoom
+                    let rowW = w1 + pageGap + w2
+                    let rowH = max(h1, h2)
+                    maxRowWidth = max(maxRowWidth, rowW)
+                    rowDimensions.append((rowW, rowH, w1, h1, w2, h2))
+                    i += 2
+                } else {
+                    let rowW = w1
+                    let rowH = h1
+                    maxRowWidth = max(maxRowWidth, rowW)
+                    rowDimensions.append((rowW, rowH, w1, h1, 0, 0))
+                    i += 1
+                }
+            }
+
+            var y = pageInset
+            for row in rowDimensions {
+                if row.rightW > 0 {
+                    let rowStartX = max((bounds.width - row.width) / 2, pageInset)
+                    let leftY = y + (row.height - row.leftH) / 2
+                    let rightY = y + (row.height - row.rightH) / 2
+                    rects.append(NSRect(x: rowStartX, y: leftY, width: row.leftW, height: row.leftH))
+                    rects.append(NSRect(x: rowStartX + row.leftW + pageGap, y: rightY, width: row.rightW, height: row.rightH))
+                } else {
+                    let rowStartX: CGFloat
+                    if count > 1 {
+                        rowStartX = max((bounds.width - maxRowWidth) / 2, pageInset)
+                    } else {
+                        rowStartX = max((bounds.width - row.width) / 2, pageInset)
+                    }
+                    rects.append(NSRect(x: rowStartX, y: y, width: row.leftW, height: row.leftH))
+                }
+                y += row.height + pageGap
+            }
+        } else {
+            var y = pageInset
+            for page in document.pages {
+                let width = CGFloat(page.mediaBox.width) * zoom
+                let height = CGFloat(page.mediaBox.height) * zoom
+                let x = max((bounds.width - width) / 2, pageInset)
+                rects.append(NSRect(x: x, y: y, width: width, height: height))
+                y += height + pageGap
+            }
         }
         pageRectsCache = rects
     }
@@ -775,11 +926,12 @@ final class DVIDocumentView: NSView {
     func scrollToPage(index: Int) {
         guard let document, index >= 0, index < document.pages.count,
               let clipView = enclosingScrollView?.contentView else { return }
+        let targetIndex = isTwoPageView ? (index - (index % 2)) : index
         let newY: CGFloat
-        if index == 0 {
+        if targetIndex == 0 {
             newY = 0
         } else {
-            let pageRect = rectForPage(at: index, page: document.pages[index])
+            let pageRect = rectForPage(at: targetIndex, page: document.pages[targetIndex])
             newY = max(pageRect.minY - pageGap / 2, 0)
         }
         clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: newY))
@@ -794,22 +946,28 @@ final class DVIDocumentView: NSView {
         for (index, page) in document.pages.enumerated() {
             let rect = rectForPage(at: index, page: page)
             if midY >= rect.minY && midY <= rect.maxY {
-                return index
+                return isTwoPageView ? (index - (index % 2)) : index
             }
             if rect.minY > midY {
-                return max(index - 1, 0)
+                let candidate = max(index - 1, 0)
+                return isTwoPageView ? (candidate - (candidate % 2)) : candidate
             }
         }
-        return document.pages.count - 1
+        let last = document.pages.count - 1
+        return isTwoPageView ? (last - (last % 2)) : last
     }
 
     func goToNextPage() {
-        let next = min(currentPageIndex + 1, (document?.pages.count ?? 1) - 1)
+        let step = isTwoPageView ? 2 : 1
+        let current = isTwoPageView ? (currentPageIndex - (currentPageIndex % 2)) : currentPageIndex
+        let next = min(current + step, (document?.pages.count ?? 1) - 1)
         scrollToPage(index: next)
     }
 
     func goToPreviousPage() {
-        let prev = max(currentPageIndex - 1, 0)
+        let step = isTwoPageView ? 2 : 1
+        let current = isTwoPageView ? (currentPageIndex - (currentPageIndex % 2)) : currentPageIndex
+        let prev = max(current - step, 0)
         scrollToPage(index: prev)
     }
 }

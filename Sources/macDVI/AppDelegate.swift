@@ -94,6 +94,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyController?.actualSize(sender)
     }
 
+    @objc func zoomToFit(_ sender: Any?) {
+        keyController?.zoomToFit(sender)
+    }
+
+    @objc func toggleTwoPageView(_ sender: Any?) {
+        keyController?.toggleTwoPageView(sender)
+    }
+
+    @objc func setSinglePageMode(_ sender: Any?) {
+        keyController?.setSinglePageMode(sender)
+    }
+
+    @objc func setTwoPagesMode(_ sender: Any?) {
+        keyController?.setTwoPagesMode(sender)
+    }
+
     @objc func pageDown(_ sender: Any?) {
         keyController?.pageDown(sender)
     }
@@ -187,9 +203,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         zoomOutItem.target = self
         let actualSizeItem = NSMenuItem(title: "Actual Size", action: #selector(actualSize(_:)), keyEquivalent: "0")
         actualSizeItem.target = self
+        let zoomToFitItem = NSMenuItem(title: "Zoom to Fit", action: #selector(zoomToFit(_:)), keyEquivalent: "9")
+        zoomToFitItem.target = self
         viewMenu.addItem(zoomInItem)
         viewMenu.addItem(zoomOutItem)
         viewMenu.addItem(actualSizeItem)
+        viewMenu.addItem(zoomToFitItem)
+
+        viewMenu.addItem(.separator())
+        let singlePageItem = NSMenuItem(title: "Single Page", action: #selector(setSinglePageMode(_:)), keyEquivalent: "1")
+        singlePageItem.keyEquivalentModifierMask = [.command, .option]
+        singlePageItem.target = self
+        let twoPagesItem = NSMenuItem(title: "Two Pages", action: #selector(setTwoPagesMode(_:)), keyEquivalent: "2")
+        twoPagesItem.keyEquivalentModifierMask = [.command, .option]
+        twoPagesItem.target = self
+        viewMenu.addItem(singlePageItem)
+        viewMenu.addItem(twoPagesItem)
+
         viewItem.submenu = viewMenu
         mainMenu.addItem(viewItem)
 
@@ -292,6 +322,27 @@ extension AppDelegate: NSMenuDelegate {
         if menu.title == "Open Recent" {
             populateRecentDocumentsMenu(menu)
         }
+    }
+}
+
+extension AppDelegate: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(setSinglePageMode(_:)) {
+            let isTwo = keyController?.isTwoPageView ?? false
+            menuItem.state = isTwo ? .off : .on
+            return keyController?.currentURL != nil
+        }
+        if menuItem.action == #selector(setTwoPagesMode(_:)) {
+            let isTwo = keyController?.isTwoPageView ?? false
+            menuItem.state = isTwo ? .on : .off
+            return keyController?.currentURL != nil
+        }
+        if menuItem.action == #selector(toggleTwoPageView(_:)) {
+            let isTwo = keyController?.isTwoPageView ?? false
+            menuItem.state = isTwo ? .on : .off
+            return keyController?.currentURL != nil
+        }
+        return true
     }
 }
 

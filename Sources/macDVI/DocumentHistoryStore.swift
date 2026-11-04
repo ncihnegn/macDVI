@@ -2,6 +2,16 @@ import Foundation
 
 enum DocumentHistoryStore {
     private static let userDefaultsKey = "macDVI.lastViewedPagePerFile"
+    private static let twoPageViewKey = "macDVI.twoPageViewEnabled"
+
+    static var isTwoPageViewEnabled: Bool {
+        get {
+            UserDefaults.standard.bool(forKey: twoPageViewKey)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: twoPageViewKey)
+        }
+    }
 
     /// Key for identifying a file in persistent storage.
     /// Uses standardized file URL path (resolving symlinks if applicable).

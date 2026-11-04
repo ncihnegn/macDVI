@@ -8,6 +8,8 @@ final class DocumentWindowController: NSWindowController {
     private var pdfView: PDFView?
     private var dviView: DVIDocumentView?
     private(set) var currentURL: URL?
+    private(set) var isTwoPageView = false
+    private weak var pageViewSegmentedControl: NSSegmentedControl?
     private var pdfPageChangeObserver: NSObjectProtocol?
     private var pdfScaleChangeObserver: NSObjectProtocol?
     private var scrollViewBoundsObserver: NSObjectProtocol?
@@ -23,6 +25,7 @@ final class DocumentWindowController: NSWindowController {
         window.title = "macDVI"
         window.minSize = NSSize(width: 560, height: 420)
         super.init(window: window)
+        isTwoPageView = DocumentHistoryStore.isTwoPageViewEnabled
         setupContent()
         setupToolbar()
         showPlaceholder()
@@ -74,7 +77,19 @@ final class DocumentWindowController: NSWindowController {
             pdfView.scaleFactor = 1.0
         }
         if let dviView {
+            dviView.autoScales = false
             dviView.zoom = 1.0
+        }
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func zoomToFit(_ sender: Any?) {
+        if let pdfView {
+            pdfView.autoScales = true
+        }
+        if let dviView {
+            dviView.autoScales = true
+            dviView.applyZoomToFit()
         }
         updateStatusForCurrentDocument()
     }
@@ -335,7 +350,8 @@ final class DocumentWindowController: NSWindowController {
         guard let pdfView else { return }
         pdfView.translatesAutoresizingMaskIntoConstraints = false
         pdfView.autoScales = true
-        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayMode = isTwoPageView ? .twoUpContinuous : .singlePageContinuous
+        pdfView.displaysAsBook = false
         pdfView.displaysPageBreaks = true
         pdfView.backgroundColor = .windowBackgroundColor
         let document = PDFDocument(url: url)
@@ -413,6 +429,8 @@ final class DocumentWindowController: NSWindowController {
 
         let dviView = DVIDocumentView(frame: NSRect(x: 0, y: 0, width: 900, height: 700))
         dviView.document = document
+        dviView.isTwoPageView = isTwoPageView
+        dviView.autoScales = true
         scrollView.documentView = dviView
         self.dviView = dviView
 
@@ -483,9 +501,50 @@ final class DocumentWindowController: NSWindowController {
             pdfView.scaleFactor = min(max(pdfView.scaleFactor * multiplier, 0.1), 8.0)
         }
         if let dviView {
+            dviView.autoScales = false
             dviView.zoom *= multiplier
         }
         updateStatusForCurrentDocument()
+    }
+
+    func setTwoPageView(_ enabled: Bool) {
+        guard isTwoPageView != enabled else { return }
+        isTwoPageView = enabled
+        DocumentHistoryStore.isTwoPageViewEnabled = enabled
+
+        if let pdfView {
+            let savedCurrentPage = pdfView.currentPage
+            pdfView.displayMode = enabled ? .twoUpContinuous : .singlePageContinuous
+            pdfView.displaysAsBook = false
+            if let savedCurrentPage {
+                pdfView.go(to: savedCurrentPage)
+            }
+        }
+
+        if let dviView {
+            let savedPageIndex = dviView.currentPageIndex
+            dviView.isTwoPageView = enabled
+            dviView.scrollToPage(index: savedPageIndex)
+        }
+
+        pageViewSegmentedControl?.selectedSegment = enabled ? 1 : 0
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func toggleTwoPageView(_ sender: Any?) {
+        setTwoPageView(!isTwoPageView)
+    }
+
+    @objc func setSinglePageMode(_ sender: Any?) {
+        setTwoPageView(false)
+    }
+
+    @objc func setTwoPagesMode(_ sender: Any?) {
+        setTwoPageView(true)
+    }
+
+    @objc func pageViewModeSegmentChanged(_ sender: NSSegmentedControl) {
+        setTwoPageView(sender.selectedSegment == 1)
     }
 
     private func updateStatusForCurrentDocument() {
@@ -509,7 +568,16 @@ final class DocumentWindowController: NSWindowController {
 
         var parts: [String] = []
         if totalPages > 0 {
-            parts.append("Page \(currentPage) of \(totalPages)")
+            if isTwoPageView && totalPages > 1 {
+                let secondPage = min(currentPage + 1, totalPages)
+                if secondPage > currentPage {
+                    parts.append("Pages \(currentPage)–\(secondPage) of \(totalPages)")
+                } else {
+                    parts.append("Page \(currentPage) of \(totalPages)")
+                }
+            } else {
+                parts.append("Page \(currentPage) of \(totalPages)")
+            }
         }
         parts.append(currentURL.lastPathComponent)
         parts.append("\(Int((zoom * 100).rounded()))%")
@@ -517,13 +585,31 @@ final class DocumentWindowController: NSWindowController {
     }
 }
 
+extension DocumentWindowController: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(setSinglePageMode(_:)) {
+            menuItem.state = isTwoPageView ? .off : .on
+            return currentURL != nil
+        }
+        if menuItem.action == #selector(setTwoPagesMode(_:)) {
+            menuItem.state = isTwoPageView ? .on : .off
+            return currentURL != nil
+        }
+        if menuItem.action == #selector(toggleTwoPageView(_:)) {
+            menuItem.state = isTwoPageView ? .on : .off
+            return currentURL != nil
+        }
+        return true
+    }
+}
+
 extension DocumentWindowController: NSToolbarDelegate {
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDocument, .goToPage, .flexibleSpace, .zoomOut, .actualSize, .zoomIn]
+        [.openDocument, .goToPage, .pageViewMode, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDocument, .goToPage, .flexibleSpace, .zoomOut, .actualSize, .zoomIn]
+        [.openDocument, .goToPage, .pageViewMode, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
     }
 
     func toolbar(
@@ -547,6 +633,24 @@ extension DocumentWindowController: NSToolbarDelegate {
             item.toolTip = "Jump to page number (⌥⌘G or ⌘J)"
             item.image = NSImage(systemSymbolName: "arrow.right.to.line", accessibilityDescription: "Go to page")
             item.action = #selector(goToPage(_:))
+        case .pageViewMode:
+            let seg = NSSegmentedControl(
+                images: [
+                    NSImage(systemSymbolName: "doc.text", accessibilityDescription: "Single Page")!,
+                    NSImage(systemSymbolName: "rectangle.split.2x1", accessibilityDescription: "Two Pages")!
+                ],
+                trackingMode: .selectOne,
+                target: self,
+                action: #selector(pageViewModeSegmentChanged(_:))
+            )
+            seg.selectedSegment = isTwoPageView ? 1 : 0
+            seg.setToolTip("Single Page (⌥⌘1)", forSegment: 0)
+            seg.setToolTip("Two Pages (⌥⌘2)", forSegment: 1)
+            pageViewSegmentedControl = seg
+            item.view = seg
+            item.label = "Page View"
+            item.paletteLabel = "Page View Mode"
+            item.toolTip = "Switch between single page and two-page view"
         case .zoomOut:
             item.label = "Zoom Out"
             item.paletteLabel = "Zoom Out"
@@ -556,9 +660,15 @@ extension DocumentWindowController: NSToolbarDelegate {
         case .actualSize:
             item.label = "Actual Size"
             item.paletteLabel = "Actual Size"
-            item.toolTip = "Actual size"
+            item.toolTip = "Actual size (⌘0)"
             item.image = NSImage(systemSymbolName: "1.magnifyingglass", accessibilityDescription: "Actual size")
             item.action = #selector(actualSize(_:))
+        case .zoomToFit:
+            item.label = "Zoom to Fit"
+            item.paletteLabel = "Zoom to Fit"
+            item.toolTip = "Zoom to fit window (⌘9)"
+            item.image = NSImage(systemSymbolName: "arrow.up.left.and.down.right.magnifyingglass", accessibilityDescription: "Zoom to fit")
+            item.action = #selector(zoomToFit(_:))
         case .zoomIn:
             item.label = "Zoom In"
             item.paletteLabel = "Zoom In"
@@ -576,7 +686,9 @@ extension DocumentWindowController: NSToolbarDelegate {
 private extension NSToolbarItem.Identifier {
     static let openDocument = NSToolbarItem.Identifier("macDVI.toolbar.open")
     static let goToPage = NSToolbarItem.Identifier("macDVI.toolbar.goToPage")
+    static let pageViewMode = NSToolbarItem.Identifier("macDVI.toolbar.pageViewMode")
     static let zoomOut = NSToolbarItem.Identifier("macDVI.toolbar.zoomOut")
     static let actualSize = NSToolbarItem.Identifier("macDVI.toolbar.actualSize")
+    static let zoomToFit = NSToolbarItem.Identifier("macDVI.toolbar.zoomToFit")
     static let zoomIn = NSToolbarItem.Identifier("macDVI.toolbar.zoomIn")
 }
