@@ -16,8 +16,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let urls = pendingFileURLs
         pendingFileURLs.removeAll()
-        for url in urls {
-            newWindow(opening: url)
+        if urls.count == 2 {
+            let controller = newWindow(opening: urls[0])
+            controller.openSideBySide(url: urls[1])
+        } else {
+            for url in urls {
+                newWindow(opening: url)
+            }
         }
         if controllers.isEmpty {
             newWindow(opening: nil)
@@ -80,6 +85,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let controller = newWindow(opening: nil)
             controller.openDocument(sender)
         }
+    }
+
+    @objc func openSideBySide(_ sender: Any?) {
+        keyController?.openSideBySide(sender)
+    }
+
+    @objc func closeSideBySide(_ sender: Any?) {
+        keyController?.closeSideBySide(sender)
+    }
+
+    @objc func toggleSyncLock(_ sender: Any?) {
+        keyController?.toggleSyncLock(sender)
+    }
+
+    @objc func resetAlignmentOffset(_ sender: Any?) {
+        keyController?.resetAlignmentOffset(sender)
+    }
+
+    @objc func toggleSyncScrolling(_ sender: Any?) {
+        keyController?.toggleSyncScrolling(sender)
     }
 
     @objc func zoomIn(_ sender: Any?) {
@@ -174,6 +199,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openItem.target = self
         fileMenu.addItem(openItem)
 
+        let openSideBySideItem = NSMenuItem(title: "Open Side by Side…", action: #selector(openSideBySide(_:)), keyEquivalent: "o")
+        openSideBySideItem.keyEquivalentModifierMask = [.command, .option]
+        openSideBySideItem.target = self
+        fileMenu.addItem(openSideBySideItem)
+
+        let closeSideBySideItem = NSMenuItem(title: "Close Side by Side", action: #selector(closeSideBySide(_:)), keyEquivalent: "w")
+        closeSideBySideItem.keyEquivalentModifierMask = [.command, .shift]
+        closeSideBySideItem.target = self
+        fileMenu.addItem(closeSideBySideItem)
+
         let openRecentItem = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
         let openRecentMenu = NSMenu(title: "Open Recent")
         openRecentMenu.delegate = self
@@ -219,6 +254,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         twoPagesItem.target = self
         viewMenu.addItem(singlePageItem)
         viewMenu.addItem(twoPagesItem)
+
+        viewMenu.addItem(.separator())
+        let syncLockItem = NSMenuItem(title: "Lock Sync", action: #selector(toggleSyncLock(_:)), keyEquivalent: "s")
+        syncLockItem.keyEquivalentModifierMask = [.command, .option]
+        syncLockItem.target = self
+        let resetAlignmentItem = NSMenuItem(title: "Reset Alignment", action: #selector(resetAlignmentOffset(_:)), keyEquivalent: "")
+        resetAlignmentItem.target = self
+        viewMenu.addItem(syncLockItem)
+        viewMenu.addItem(resetAlignmentItem)
 
         viewItem.submenu = viewMenu
         mainMenu.addItem(viewItem)
@@ -341,6 +385,20 @@ extension AppDelegate: NSMenuItemValidation {
             let isTwo = keyController?.isTwoPageView ?? false
             menuItem.state = isTwo ? .on : .off
             return keyController?.currentURL != nil
+        }
+        if menuItem.action == #selector(openSideBySide(_:)) {
+            return keyController?.currentURL != nil
+        }
+        if menuItem.action == #selector(closeSideBySide(_:)) {
+            return keyController?.secondaryPane != nil
+        }
+        if menuItem.action == #selector(toggleSyncLock(_:)) || menuItem.action == #selector(toggleSyncScrolling(_:)) {
+            let isLocked = keyController?.isSyncLocked ?? false
+            menuItem.state = isLocked ? .on : .off
+            return keyController?.secondaryPane != nil
+        }
+        if menuItem.action == #selector(resetAlignmentOffset(_:)) {
+            return keyController?.secondaryPane != nil
         }
         return true
     }

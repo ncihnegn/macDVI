@@ -970,6 +970,62 @@ final class DVIDocumentView: NSView {
         let prev = max(current - step, 0)
         scrollToPage(index: prev)
     }
+
+    func currentScrollPosition() -> (pageIndex: Int, progress: CGFloat) {
+        guard let document, !document.pages.isEmpty,
+              let clipView = enclosingScrollView?.contentView else {
+            return (0, 0)
+        }
+        let y = clipView.bounds.origin.y
+        ensurePageRectsCached()
+        let count = document.pages.count
+
+        if isTwoPageView {
+            var i = 0
+            while i < count {
+                let rect = rectForPage(at: i, page: document.pages[i])
+                let nextRowIndex = i + 2
+                let nextY = (nextRowIndex < count) ? rectForPage(at: nextRowIndex, page: document.pages[nextRowIndex]).minY : rect.maxY
+                let rowSpan = max(nextY - rect.minY, rect.height)
+                if y < nextY || nextRowIndex >= count {
+                    let progress = max(min((y - rect.minY) / max(rowSpan, 1), 1.0), 0.0)
+                    return (i, progress)
+                }
+                i += 2
+            }
+            return (count - 1, 0)
+        } else {
+            for i in 0..<count {
+                let rect = rectForPage(at: i, page: document.pages[i])
+                let nextY = (i + 1 < count) ? rectForPage(at: i + 1, page: document.pages[i + 1]).minY : rect.maxY
+                let rowSpan = max(nextY - rect.minY, rect.height)
+                if y < nextY || i == count - 1 {
+                    let progress = max(min((y - rect.minY) / max(rowSpan, 1), 1.0), 0.0)
+                    return (i, progress)
+                }
+            }
+            return (count - 1, 0)
+        }
+    }
+
+    func scrollToPosition(pageIndex: Int, progress: CGFloat) {
+        guard let document, !document.pages.isEmpty,
+              let clipView = enclosingScrollView?.contentView else { return }
+        ensurePageRectsCached()
+        let count = document.pages.count
+        let clampedIndex = max(min(pageIndex, count - 1), 0)
+        let baseIndex = isTwoPageView ? (clampedIndex / 2) * 2 : clampedIndex
+        let rect = rectForPage(at: baseIndex, page: document.pages[baseIndex])
+        let nextIndex = isTwoPageView ? baseIndex + 2 : baseIndex + 1
+        let nextY = (nextIndex < count) ? rectForPage(at: nextIndex, page: document.pages[nextIndex]).minY : rect.maxY
+        let rowSpan = max(nextY - rect.minY, rect.height)
+        let targetY = rect.minY + progress * rowSpan
+        let maxScrollY = max(bounds.height - clipView.bounds.height, 0)
+        let clampedY = max(min(targetY, maxScrollY), 0)
+        clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: clampedY))
+        enclosingScrollView?.reflectScrolledClipView(clipView)
+        needsDisplay = true
+    }
 }
 
 private struct FontCacheKey: Hashable {

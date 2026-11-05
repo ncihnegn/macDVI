@@ -5,19 +5,38 @@ import PDFKit
 final class DocumentWindowController: NSWindowController {
     private let contentContainer = NSView()
     private let statusField = NSTextField(labelWithString: "Open a document")
-    private var pdfView: PDFView?
-    private var dviView: DVIDocumentView?
-    private(set) var currentURL: URL?
+
+    private let primaryPane = DocumentPane()
+    private(set) var secondaryPane: DocumentPane?
+    private let splitView = NSSplitView()
+
+    var currentURL: URL? {
+        primaryPane.currentURL
+    }
+
     private(set) var isTwoPageView = false
     private weak var pageViewSegmentedControl: NSSegmentedControl?
-    private var pdfPageChangeObserver: NSObjectProtocol?
-    private var pdfScaleChangeObserver: NSObjectProtocol?
-    private var scrollViewBoundsObserver: NSObjectProtocol?
-    private var isRestoringPage = false
+    private(set) var isSyncLocked = false
+    private(set) var alignmentOffset: Double = 0.0
+    private var isSyncing = false
+
+    var isSyncScrollingEnabled: Bool {
+        isSyncLocked
+    }
+
+    var focusedPane: DocumentPane {
+        guard let sec = secondaryPane, let window else { return primaryPane }
+        if let responder = window.firstResponder as? NSView {
+            if responder.isDescendant(of: sec.containerView) {
+                return sec
+            }
+        }
+        return primaryPane
+    }
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 1040, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -26,191 +45,16 @@ final class DocumentWindowController: NSWindowController {
         window.minSize = NSSize(width: 560, height: 420)
         super.init(window: window)
         isTwoPageView = DocumentHistoryStore.isTwoPageViewEnabled
+        primaryPane.isTwoPageView = isTwoPageView
         setupContent()
         setupToolbar()
+        setupPaneCallbacks(primaryPane)
         showPlaceholder()
         window.center()
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    func openDocument(url: URL) {
-        saveCurrentPage()
-        currentURL = url
-        window?.title = url.lastPathComponent
-        showLoading(message: "Opening \(url.lastPathComponent)...")
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result { try DVIDocumentLoader.load(url: url) }
-            DispatchQueue.main.async {
-                self?.handleLoadResult(result, url: url)
-            }
-        }
-    }
-
-    @objc func openDocument(_ sender: Any?) {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = ["dvi", "xdv", "ps", "eps", "pdf"].compactMap {
-            UTType(filenameExtension: $0)
-        }
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.beginSheetModal(for: window!) { [weak self] response in
-            guard response == .OK, let url = panel.url else { return }
-            self?.openDocument(url: url)
-        }
-    }
-
-    @objc func zoomIn(_ sender: Any?) {
-        adjustZoom(by: 1.2)
-    }
-
-    @objc func zoomOut(_ sender: Any?) {
-        adjustZoom(by: 1.0 / 1.2)
-    }
-
-    @objc func actualSize(_ sender: Any?) {
-        if let pdfView {
-            pdfView.autoScales = false
-            pdfView.scaleFactor = 1.0
-        }
-        if let dviView {
-            dviView.autoScales = false
-            dviView.zoom = 1.0
-        }
-        updateStatusForCurrentDocument()
-    }
-
-    @objc func zoomToFit(_ sender: Any?) {
-        if let pdfView {
-            pdfView.autoScales = true
-        }
-        if let dviView {
-            dviView.autoScales = true
-            dviView.applyZoomToFit()
-        }
-        updateStatusForCurrentDocument()
-    }
-
-    override func pageDown(_ sender: Any?) {
-        if let pdfView {
-            pdfView.pageDown(sender)
-        }
-        if let dviView {
-            dviView.scrollPageDown()
-        }
-    }
-
-    override func pageUp(_ sender: Any?) {
-        if let pdfView {
-            pdfView.pageUp(sender)
-        }
-        if let dviView {
-            dviView.scrollPageUp()
-        }
-    }
-
-    @objc func nextPage(_ sender: Any?) {
-        if let pdfView {
-            pdfView.goToNextPage(sender)
-        }
-        if let dviView {
-            dviView.goToNextPage()
-        }
-    }
-
-    @objc func previousPage(_ sender: Any?) {
-        if let pdfView {
-            pdfView.goToPreviousPage(sender)
-        }
-        if let dviView {
-            dviView.goToPreviousPage()
-        }
-    }
-
-    @objc func firstPage(_ sender: Any?) {
-        if let pdfView {
-            pdfView.goToFirstPage(sender)
-        }
-        if let dviView {
-            dviView.scrollToTop()
-        }
-    }
-
-    @objc func lastPage(_ sender: Any?) {
-        if let pdfView {
-            pdfView.goToLastPage(sender)
-        }
-        if let dviView {
-            dviView.scrollToBottom()
-        }
-    }
-
-    @objc func goToPage(_ sender: Any?) {
-        guard let window else { return }
-        let totalPages: Int
-        let currentPage: Int
-        if let dviView, let doc = dviView.document {
-            totalPages = doc.pages.count
-            currentPage = dviView.currentPageIndex + 1
-        } else if let pdfView, let doc = pdfView.document {
-            totalPages = doc.pageCount
-            currentPage = (pdfView.currentPage != nil ? doc.index(for: pdfView.currentPage!) : 0) + 1
-        } else {
-            return
-        }
-        guard totalPages > 0 else { return }
-
-        let alert = NSAlert()
-        alert.messageText = "Go to Page"
-        alert.informativeText = "Enter page number (1 to \(totalPages)):"
-        let goButton = alert.addButton(withTitle: "Go")
-        alert.addButton(withTitle: "Cancel")
-
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 140, height: 24))
-        input.stringValue = "\(currentPage)"
-        input.alignment = .center
-        input.target = goButton
-        input.action = #selector(NSButton.performClick(_:))
-        alert.accessoryView = input
-        alert.window.initialFirstResponder = input
-
-        DispatchQueue.main.async {
-            input.selectText(nil)
-        }
-
-        alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertFirstButtonReturn,
-                  let self,
-                  let pageNum = Int(input.stringValue.trimmingCharacters(in: .whitespaces)) else { return }
-            self.jumpToPage(pageNum)
-        }
-    }
-
-    func jumpToPage(_ pageNumber: Int) {
-        let totalPages: Int
-        if let dviView, let doc = dviView.document {
-            totalPages = doc.pages.count
-        } else if let pdfView, let doc = pdfView.document {
-            totalPages = doc.pageCount
-        } else {
-            return
-        }
-        guard totalPages > 0 else { return }
-        let clampedPage = max(min(pageNumber, totalPages), 1)
-        let targetIndex = clampedPage - 1
-
-        if let dviView {
-            dviView.scrollToPage(index: targetIndex)
-            saveCurrentPage()
-            updateStatusForCurrentDocument()
-        } else if let pdfView, let doc = pdfView.document, let targetPage = doc.page(at: targetIndex) {
-            positionPDFViewAtTop(pdfView, page: targetPage)
-            saveCurrentPage()
-            updateStatusForCurrentDocument()
-        }
     }
 
     private func setupContent() {
@@ -248,25 +92,46 @@ final class DocumentWindowController: NSWindowController {
         window?.toolbar = toolbar
     }
 
-    private func handleLoadResult(_ result: Result<DVIDocumentLoadResult, Error>, url: URL) {
-        switch result {
-        case .success(.pdf(let conversion)):
-            NSDocumentController.shared.noteNewRecentDocumentURL(url)
-            showPDF(url: conversion.pdfURL)
-            statusField.stringValue = "Rendered \(url.lastPathComponent) with \(conversion.converterName)"
-            updateStatusForCurrentDocument()
-        case .success(.native(let document)):
-            NSDocumentController.shared.noteNewRecentDocumentURL(url)
-            showNative(document: document)
-            var status = "Rendered \(url.lastPathComponent) with native renderer"
-            if !document.warnings.isEmpty {
-                status += " - \(document.warnings.count) warning(s)"
+    private func setupPaneCallbacks(_ pane: DocumentPane) {
+        pane.onScroll = { [weak self, weak pane] _ in
+            guard let self, let pane, self.isSyncLocked, !self.isSyncing else {
+                self?.updateStatusForCurrentDocument()
+                return
             }
-            statusField.stringValue = status
-            updateStatusForCurrentDocument()
-        case .failure(let error):
-            showError(error)
+            guard let sec = self.secondaryPane else { return }
+
+            self.isSyncing = true
+            defer { self.isSyncing = false }
+
+            if pane === self.primaryPane {
+                if let posA = self.primaryPane.continuousPosition {
+                    sec.scrollToContinuousPosition(posA + self.alignmentOffset)
+                }
+            } else {
+                if let posB = sec.continuousPosition {
+                    self.primaryPane.scrollToContinuousPosition(posB - self.alignmentOffset)
+                }
+            }
+            self.updateStatusForCurrentDocument()
         }
+
+        pane.onPageChange = { [weak self] _ in
+            self?.updateStatusForCurrentDocument()
+        }
+
+        pane.onScaleChange = { [weak self] _ in
+            self?.updateStatusForCurrentDocument()
+        }
+
+        pane.onPaneActivated = { [weak self] activatedPane in
+            self?.updatePaneFocus(activePane: activatedPane)
+        }
+    }
+
+    func updatePaneFocus(activePane: DocumentPane? = nil) {
+        let active = activePane ?? focusedPane
+        primaryPane.isFocused = (active === primaryPane)
+        secondaryPane?.isFocused = (active === secondaryPane)
     }
 
     private func showPlaceholder() {
@@ -282,211 +147,18 @@ final class DocumentWindowController: NSWindowController {
         statusField.stringValue = "No document open"
     }
 
-    private func showLoading(message: String) {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        let spinner = NSProgressIndicator()
-        spinner.style = .spinning
-        spinner.controlSize = .large
-        spinner.startAnimation(nil)
-
-        let label = NSTextField(labelWithString: message)
-        label.textColor = .secondaryLabelColor
-
-        stack.addArrangedSubview(spinner)
-        stack.addArrangedSubview(label)
-        replaceContent(with: stack)
-        NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: contentContainer.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: contentContainer.centerYAnchor)
-        ])
-        statusField.stringValue = message
-    }
-
-    deinit {
-        cleanUpObservers()
-    }
-
-    private func cleanUpObservers() {
-        if let observer = pdfPageChangeObserver {
-            NotificationCenter.default.removeObserver(observer)
-            pdfPageChangeObserver = nil
-        }
-        if let observer = pdfScaleChangeObserver {
-            NotificationCenter.default.removeObserver(observer)
-            pdfScaleChangeObserver = nil
-        }
-        if let observer = scrollViewBoundsObserver {
-            NotificationCenter.default.removeObserver(observer)
-            scrollViewBoundsObserver = nil
-        }
-    }
-
-    func saveCurrentPage() {
-        guard let currentURL, !isRestoringPage else { return }
-        if let pdfView, let document = pdfView.document, let currentPage = pdfView.currentPage {
-            let pageIndex = document.index(for: currentPage)
-            if pageIndex >= 0 {
-                DocumentHistoryStore.setLastViewedPage(pageIndex, for: currentURL)
-                updateStatusForCurrentDocument()
-            }
-        } else if let dviView {
-            let pageIndex = dviView.currentPageIndex
-            if pageIndex >= 0 {
-                DocumentHistoryStore.setLastViewedPage(pageIndex, for: currentURL)
-                updateStatusForCurrentDocument()
-            }
-        }
-    }
-
-    private func showPDF(url: URL) {
-        cleanUpObservers()
-        pdfView = PDFView()
-        dviView = nil
-        guard let pdfView else { return }
-        pdfView.translatesAutoresizingMaskIntoConstraints = false
-        pdfView.autoScales = true
-        pdfView.displayMode = isTwoPageView ? .twoUpContinuous : .singlePageContinuous
-        pdfView.displaysAsBook = false
-        pdfView.displaysPageBreaks = true
-        pdfView.backgroundColor = .windowBackgroundColor
-        let document = PDFDocument(url: url)
-        pdfView.document = document
-        replaceContent(with: pdfView)
-        pinToContainer(pdfView)
-        window?.makeFirstResponder(pdfView)
-
-        let targetIndex: Int
-        if let saved = DocumentHistoryStore.lastViewedPage(for: currentURL ?? url),
-           let count = document?.pageCount, saved >= 0 && saved < count {
-            targetIndex = saved
-        } else {
-            targetIndex = 0
-        }
-
-        if let targetPage = document?.page(at: targetIndex) {
-            isRestoringPage = true
-            positionPDFViewAtTop(pdfView, page: targetPage)
-            DispatchQueue.main.async { [weak self, weak pdfView] in
-                guard let self, let pdfView else { return }
-                self.positionPDFViewAtTop(pdfView, page: targetPage)
-                DispatchQueue.main.async { [weak self] in
-                    self?.isRestoringPage = false
-                }
-            }
-        }
-
-        pdfPageChangeObserver = NotificationCenter.default.addObserver(
-            forName: .PDFViewPageChanged,
-            object: pdfView,
-            queue: .main
-        ) { [weak self] _ in
-            self?.saveCurrentPage()
-        }
-
-        pdfScaleChangeObserver = NotificationCenter.default.addObserver(
-            forName: .PDFViewScaleChanged,
-            object: pdfView,
-            queue: .main
-        ) { [weak self] _ in
-            self?.updateStatusForCurrentDocument()
-        }
-    }
-
-    private func positionPDFViewAtTop(_ pdfView: PDFView, page: PDFPage) {
-        window?.contentView?.layoutSubtreeIfNeeded()
-        pdfView.layoutDocumentView()
-
-        let pageBounds = page.bounds(for: pdfView.displayBox)
-        let topOfPage = PDFDestination(
-            page: page,
-            at: CGPoint(x: pageBounds.midX, y: pageBounds.maxY)
-        )
-        pdfView.go(to: topOfPage)
-    }
-
-    private func positionDVIView(at targetIndex: Int) {
-        guard let dviView else { return }
-        window?.contentView?.layoutSubtreeIfNeeded()
-        dviView.scrollToPage(index: targetIndex)
-    }
-
-    private func showNative(document: DVIDocument) {
-        cleanUpObservers()
-        pdfView = nil
-
-        let scrollView = NSScrollView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = true
-        scrollView.autohidesScrollers = false
-        scrollView.backgroundColor = .windowBackgroundColor
-        scrollView.drawsBackground = true
-
-        let dviView = DVIDocumentView(frame: NSRect(x: 0, y: 0, width: 900, height: 700))
-        dviView.document = document
-        dviView.isTwoPageView = isTwoPageView
-        dviView.autoScales = true
-        scrollView.documentView = dviView
-        self.dviView = dviView
-
-        replaceContent(with: scrollView)
-        pinToContainer(scrollView)
-        window?.makeFirstResponder(dviView)
-
-        let targetIndex: Int
-        if let saved = DocumentHistoryStore.lastViewedPage(for: document.url),
-           saved >= 0 && saved < document.pages.count {
-            targetIndex = saved
-        } else {
-            targetIndex = 0
-        }
-
-        isRestoringPage = true
-        positionDVIView(at: targetIndex)
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.positionDVIView(at: targetIndex)
-            DispatchQueue.main.async { [weak self] in
-                self?.isRestoringPage = false
-            }
-        }
-
-        scrollView.contentView.postsBoundsChangedNotifications = true
-        scrollViewBoundsObserver = NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView,
-            queue: .main
-        ) { [weak self] _ in
-            self?.saveCurrentPage()
-        }
-    }
-
-    private func showError(_ error: Error) {
-        let label = NSTextField(wrappingLabelWithString: error.localizedDescription)
-        label.font = .systemFont(ofSize: 13)
-        label.textColor = .secondaryLabelColor
-        label.alignment = .center
-        label.translatesAutoresizingMaskIntoConstraints = false
-        replaceContent(with: label)
-        NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: contentContainer.centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: contentContainer.centerYAnchor),
-            label.widthAnchor.constraint(lessThanOrEqualTo: contentContainer.widthAnchor, multiplier: 0.72)
-        ])
-        statusField.stringValue = "Could not open document"
-    }
-
     private func replaceContent(with view: NSView) {
         contentContainer.subviews.forEach { $0.removeFromSuperview() }
         contentContainer.addSubview(view)
     }
 
-    private func pinToContainer(_ view: NSView) {
+    private func layoutSinglePane() {
+        contentContainer.subviews.forEach { $0.removeFromSuperview() }
+        splitView.subviews.forEach { $0.removeFromSuperview() }
+
+        let view = primaryPane.containerView
+        view.translatesAutoresizingMaskIntoConstraints = false
+        contentContainer.addSubview(view)
         NSLayoutConstraint.activate([
             view.topAnchor.constraint(equalTo: contentContainer.topAnchor),
             view.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
@@ -495,14 +167,258 @@ final class DocumentWindowController: NSWindowController {
         ])
     }
 
-    private func adjustZoom(by multiplier: CGFloat) {
-        if let pdfView {
-            pdfView.autoScales = false
-            pdfView.scaleFactor = min(max(pdfView.scaleFactor * multiplier, 0.1), 8.0)
+    private func layoutSplitView() {
+        contentContainer.subviews.forEach { $0.removeFromSuperview() }
+        splitView.subviews.forEach { $0.removeFromSuperview() }
+
+        splitView.isVertical = true
+        splitView.dividerStyle = .thin
+        splitView.translatesAutoresizingMaskIntoConstraints = false
+
+        splitView.addSubview(primaryPane.containerView)
+        if let sec = secondaryPane {
+            splitView.addSubview(sec.containerView)
         }
-        if let dviView {
-            dviView.autoScales = false
-            dviView.zoom *= multiplier
+
+        contentContainer.addSubview(splitView)
+        NSLayoutConstraint.activate([
+            splitView.topAnchor.constraint(equalTo: contentContainer.topAnchor),
+            splitView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+            splitView.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor)
+        ])
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.splitView.subviews.count >= 2 else { return }
+            let mid = self.contentContainer.bounds.width / 2
+            self.splitView.setPosition(mid, ofDividerAt: 0)
+        }
+    }
+
+    func openDocument(url: URL) {
+        saveCurrentPage()
+        if secondaryPane == nil {
+            layoutSinglePane()
+        }
+        primaryPane.load(url: url) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                NSDocumentController.shared.noteNewRecentDocumentURL(url)
+                self.primaryPane.makeFirstResponder()
+                self.updateStatusForCurrentDocument()
+            case .failure:
+                self.updateStatusForCurrentDocument()
+            }
+        }
+    }
+
+    @objc func openDocument(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = ["dvi", "xdv", "ps", "eps", "pdf"].compactMap {
+            UTType(filenameExtension: $0)
+        }
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.beginSheetModal(for: window!) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.openDocument(url: url)
+        }
+    }
+
+    func openSideBySide(url: URL) {
+        let sec = DocumentPane()
+        sec.isTwoPageView = isTwoPageView
+        sec.autoScales = primaryPane.autoScales
+        sec.showHeader = true
+        sec.showCloseButton = true
+        sec.showSyncButton = false
+        sec.onClose = { [weak self] in
+            self?.closeSideBySide()
+        }
+        setupPaneCallbacks(sec)
+        self.secondaryPane = sec
+
+        primaryPane.showHeader = true
+        primaryPane.showCloseButton = false
+        primaryPane.showSyncButton = true
+        primaryPane.onSyncToggle = { [weak self] in
+            self?.toggleSyncLock()
+        }
+
+        // Initially in manual alignment mode (unlocked)
+        isSyncLocked = false
+        alignmentOffset = 0.0
+
+        layoutSplitView()
+        updatePaneFocus()
+        updateSyncButtonUI()
+
+        sec.load(url: url) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                NSDocumentController.shared.noteNewRecentDocumentURL(url)
+                self.updatePaneFocus()
+                self.updateSyncButtonUI()
+                self.updateStatusForCurrentDocument()
+            case .failure:
+                self.updateStatusForCurrentDocument()
+            }
+        }
+    }
+
+    @objc func openSideBySide(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.title = "Select Document for Side by Side View"
+        panel.allowedContentTypes = ["dvi", "xdv", "ps", "eps", "pdf"].compactMap {
+            UTType(filenameExtension: $0)
+        }
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.beginSheetModal(for: window!) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.openSideBySide(url: url)
+        }
+    }
+
+    @objc func closeSideBySide(_ sender: Any? = nil) {
+        guard let sec = secondaryPane else { return }
+        sec.saveCurrentPage()
+        sec.cleanUpObservers()
+        secondaryPane = nil
+        isSyncLocked = false
+        alignmentOffset = 0.0
+        primaryPane.showHeader = false
+        primaryPane.showSyncButton = false
+        layoutSinglePane()
+        updatePaneFocus()
+        updateStatusForCurrentDocument()
+        window?.toolbar?.validateVisibleItems()
+    }
+
+    @objc func toggleSyncLock(_ sender: Any? = nil) {
+        guard secondaryPane != nil else { return }
+        if isSyncLocked {
+            unlockSync()
+        } else {
+            lockSync()
+        }
+    }
+
+    func lockSync() {
+        guard let sec = secondaryPane else { return }
+        let pPos = primaryPane.continuousPosition ?? 0.0
+        let sPos = sec.continuousPosition ?? 0.0
+        alignmentOffset = sPos - pPos
+        isSyncLocked = true
+        updateSyncButtonUI()
+        updateStatusForCurrentDocument()
+    }
+
+    func unlockSync() {
+        isSyncLocked = false
+        updateSyncButtonUI()
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func resetAlignmentOffset(_ sender: Any? = nil) {
+        guard let sec = secondaryPane else { return }
+        alignmentOffset = 0.0
+        if let pPos = primaryPane.continuousPosition {
+            sec.scrollToContinuousPosition(pPos)
+        }
+        updateSyncButtonUI()
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func toggleSyncScrolling(_ sender: Any? = nil) {
+        toggleSyncLock(sender)
+    }
+
+    private func updateSyncButtonUI() {
+        let offsetStr: String
+        if abs(alignmentOffset) < 0.05 {
+            offsetStr = "0p"
+        } else {
+            let rounded = alignmentOffset.rounded()
+            if abs(rounded - alignmentOffset) < 0.05 {
+                offsetStr = String(format: "%+dp", Int(rounded))
+            } else {
+                offsetStr = String(format: "%+.1fp", alignmentOffset)
+            }
+        }
+        primaryPane.setSyncState(isLocked: isSyncLocked, offsetText: offsetStr)
+        window?.toolbar?.validateVisibleItems()
+    }
+
+    func saveCurrentPage() {
+        primaryPane.saveCurrentPage()
+        secondaryPane?.saveCurrentPage()
+    }
+
+    // MARK: - Synchronized Zoom & View
+
+    @objc func zoomIn(_ sender: Any?) {
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            let pPos = primaryPane.continuousPosition
+            primaryPane.zoomIn()
+            sec.zoomIn()
+            if let pPos {
+                sec.scrollToContinuousPosition(pPos + alignmentOffset)
+            }
+        } else {
+            focusedPane.zoomIn()
+        }
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func zoomOut(_ sender: Any?) {
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            let pPos = primaryPane.continuousPosition
+            primaryPane.zoomOut()
+            sec.zoomOut()
+            if let pPos {
+                sec.scrollToContinuousPosition(pPos + alignmentOffset)
+            }
+        } else {
+            focusedPane.zoomOut()
+        }
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func actualSize(_ sender: Any?) {
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            let pPos = primaryPane.continuousPosition
+            primaryPane.actualSize()
+            sec.actualSize()
+            if let pPos {
+                sec.scrollToContinuousPosition(pPos + alignmentOffset)
+            }
+        } else {
+            focusedPane.actualSize()
+        }
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func zoomToFit(_ sender: Any?) {
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            let pPos = primaryPane.continuousPosition
+            primaryPane.zoomToFit()
+            sec.zoomToFit()
+            if let pPos {
+                sec.scrollToContinuousPosition(pPos + alignmentOffset)
+            }
+        } else {
+            focusedPane.zoomToFit()
         }
         updateStatusForCurrentDocument()
     }
@@ -511,22 +427,19 @@ final class DocumentWindowController: NSWindowController {
         guard isTwoPageView != enabled else { return }
         isTwoPageView = enabled
         DocumentHistoryStore.isTwoPageViewEnabled = enabled
-
-        if let pdfView {
-            let savedCurrentPage = pdfView.currentPage
-            pdfView.displayMode = enabled ? .twoUpContinuous : .singlePageContinuous
-            pdfView.displaysAsBook = false
-            if let savedCurrentPage {
-                pdfView.go(to: savedCurrentPage)
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            let pPos = primaryPane.continuousPosition
+            primaryPane.isTwoPageView = enabled
+            sec.isTwoPageView = enabled
+            if let pPos {
+                sec.scrollToContinuousPosition(pPos + alignmentOffset)
             }
+        } else {
+            primaryPane.isTwoPageView = enabled
+            secondaryPane?.isTwoPageView = enabled
         }
-
-        if let dviView {
-            let savedPageIndex = dviView.currentPageIndex
-            dviView.isTwoPageView = enabled
-            dviView.scrollToPage(index: savedPageIndex)
-        }
-
         pageViewSegmentedControl?.selectedSegment = enabled ? 1 : 0
         updateStatusForCurrentDocument()
     }
@@ -547,41 +460,233 @@ final class DocumentWindowController: NSWindowController {
         setTwoPageView(sender.selectedSegment == 1)
     }
 
-    private func updateStatusForCurrentDocument() {
-        guard let currentURL else { return }
-        let zoom: CGFloat
-        let currentPage: Int
-        let totalPages: Int
-        if let pdfView, let doc = pdfView.document {
-            zoom = pdfView.scaleFactor
-            totalPages = doc.pageCount
-            currentPage = (pdfView.currentPage != nil ? doc.index(for: pdfView.currentPage!) : 0) + 1
-        } else if let dviView, let doc = dviView.document {
-            zoom = dviView.zoom
-            totalPages = doc.pages.count
-            currentPage = dviView.currentPageIndex + 1
-        } else {
-            zoom = 1.0
-            totalPages = 0
-            currentPage = 0
-        }
+    // MARK: - Synchronized Navigation
 
-        var parts: [String] = []
-        if totalPages > 0 {
-            if isTwoPageView && totalPages > 1 {
-                let secondPage = min(currentPage + 1, totalPages)
-                if secondPage > currentPage {
-                    parts.append("Pages \(currentPage)–\(secondPage) of \(totalPages)")
-                } else {
-                    parts.append("Page \(currentPage) of \(totalPages)")
+    override func pageDown(_ sender: Any?) {
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            if focusedPane === sec {
+                sec.pageDown(sender)
+                if let sPos = sec.continuousPosition {
+                    primaryPane.scrollToContinuousPosition(sPos - alignmentOffset)
                 }
             } else {
-                parts.append("Page \(currentPage) of \(totalPages)")
+                primaryPane.pageDown(sender)
+                if let pPos = primaryPane.continuousPosition {
+                    sec.scrollToContinuousPosition(pPos + alignmentOffset)
+                }
             }
+        } else {
+            focusedPane.pageDown(sender)
         }
-        parts.append(currentURL.lastPathComponent)
-        parts.append("\(Int((zoom * 100).rounded()))%")
-        statusField.stringValue = parts.joined(separator: " - ")
+        updatePaneFocus()
+        updateStatusForCurrentDocument()
+    }
+
+    override func pageUp(_ sender: Any?) {
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            if focusedPane === sec {
+                sec.pageUp(sender)
+                if let sPos = sec.continuousPosition {
+                    primaryPane.scrollToContinuousPosition(sPos - alignmentOffset)
+                }
+            } else {
+                primaryPane.pageUp(sender)
+                if let pPos = primaryPane.continuousPosition {
+                    sec.scrollToContinuousPosition(pPos + alignmentOffset)
+                }
+            }
+        } else {
+            focusedPane.pageUp(sender)
+        }
+        updatePaneFocus()
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func nextPage(_ sender: Any?) {
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            if focusedPane === sec {
+                sec.nextPage(sender)
+                if let sPos = sec.continuousPosition {
+                    primaryPane.scrollToContinuousPosition(sPos - alignmentOffset)
+                }
+            } else {
+                primaryPane.nextPage(sender)
+                if let pPos = primaryPane.continuousPosition {
+                    sec.scrollToContinuousPosition(pPos + alignmentOffset)
+                }
+            }
+        } else {
+            focusedPane.nextPage(sender)
+        }
+        updatePaneFocus()
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func previousPage(_ sender: Any?) {
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            if focusedPane === sec {
+                sec.previousPage(sender)
+                if let sPos = sec.continuousPosition {
+                    primaryPane.scrollToContinuousPosition(sPos - alignmentOffset)
+                }
+            } else {
+                primaryPane.previousPage(sender)
+                if let pPos = primaryPane.continuousPosition {
+                    sec.scrollToContinuousPosition(pPos + alignmentOffset)
+                }
+            }
+        } else {
+            focusedPane.previousPage(sender)
+        }
+        updatePaneFocus()
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func firstPage(_ sender: Any?) {
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            primaryPane.firstPage(sender)
+            if let pPos = primaryPane.continuousPosition {
+                sec.scrollToContinuousPosition(pPos + alignmentOffset)
+            }
+        } else {
+            focusedPane.firstPage(sender)
+        }
+        updatePaneFocus()
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func lastPage(_ sender: Any?) {
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            primaryPane.lastPage(sender)
+            if let pPos = primaryPane.continuousPosition {
+                sec.scrollToContinuousPosition(pPos + alignmentOffset)
+            }
+        } else {
+            focusedPane.lastPage(sender)
+        }
+        updatePaneFocus()
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func goToPage(_ sender: Any?) {
+        guard let window else { return }
+        let targetPane = focusedPane
+        let total = targetPane.totalPages
+        let current = targetPane.currentPageNumber
+        guard total > 0 else { return }
+
+        let alert = NSAlert()
+        let docName = targetPane.currentURL?.lastPathComponent ?? "Document"
+        alert.messageText = "Go to Page — \(docName)"
+        alert.informativeText = "Enter page number (1 to \(total)):"
+        let goButton = alert.addButton(withTitle: "Go")
+        alert.addButton(withTitle: "Cancel")
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 140, height: 24))
+        input.stringValue = "\(current)"
+        input.alignment = .center
+        input.target = goButton
+        input.action = #selector(NSButton.performClick(_:))
+        alert.accessoryView = input
+        alert.window.initialFirstResponder = input
+
+        DispatchQueue.main.async {
+            input.selectText(nil)
+        }
+
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn,
+                  let self,
+                  let pageNum = Int(input.stringValue.trimmingCharacters(in: .whitespaces)) else { return }
+            self.jumpToPage(pageNum, on: targetPane)
+        }
+    }
+
+    func jumpToPage(_ pageNumber: Int, on targetPane: DocumentPane? = nil) {
+        let pane = targetPane ?? focusedPane
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            pane.jumpToPage(pageNumber)
+            if pane === sec {
+                if let sPos = sec.continuousPosition {
+                    primaryPane.scrollToContinuousPosition(sPos - alignmentOffset)
+                }
+            } else {
+                if let pPos = primaryPane.continuousPosition {
+                    sec.scrollToContinuousPosition(pPos + alignmentOffset)
+                }
+            }
+        } else {
+            pane.jumpToPage(pageNumber)
+        }
+        updatePaneFocus()
+        updateStatusForCurrentDocument()
+    }
+
+    // MARK: - Status & Title
+
+    private func updateStatusForCurrentDocument() {
+        guard let primaryURL = primaryPane.currentURL else {
+            statusField.stringValue = "No document open"
+            window?.title = "macDVI"
+            return
+        }
+
+        let pCurrent = primaryPane.currentPageNumber
+        let pTotal = primaryPane.totalPages
+        let pZoom = primaryPane.zoomFactor
+
+        if let secondary = secondaryPane, let secURL = secondary.currentURL {
+            let sCurrent = secondary.currentPageNumber
+            let sTotal = secondary.totalPages
+
+            window?.title = "\(primaryURL.lastPathComponent) ↔ \(secURL.lastPathComponent)"
+
+            var parts: [String] = []
+            parts.append("\(primaryURL.lastPathComponent) (Page \(pCurrent)/\(pTotal))")
+            parts.append("↔")
+            parts.append("\(secURL.lastPathComponent) (Page \(sCurrent)/\(sTotal))")
+            parts.append("\(Int((pZoom * 100).rounded()))%")
+            if isSyncLocked {
+                let offsetStr = abs(alignmentOffset) < 0.05 ? "aligned" : String(format: "%+.1fp", alignmentOffset)
+                parts.append("(Sync: \(offsetStr))")
+            } else {
+                parts.append("(Aligning - Sync Unlocked)")
+            }
+            statusField.stringValue = parts.joined(separator: " ")
+        } else {
+            window?.title = primaryURL.lastPathComponent
+
+            var parts: [String] = []
+            if pTotal > 0 {
+                if isTwoPageView && pTotal > 1 {
+                    let second = min(pCurrent + 1, pTotal)
+                    if second > pCurrent {
+                        parts.append("Pages \(pCurrent)–\(second) of \(pTotal)")
+                    } else {
+                        parts.append("Page \(pCurrent) of \(pTotal)")
+                    }
+                } else {
+                    parts.append("Page \(pCurrent) of \(pTotal)")
+                }
+            }
+            parts.append(primaryURL.lastPathComponent)
+            parts.append("\(Int((pZoom * 100).rounded()))%")
+            statusField.stringValue = parts.joined(separator: " - ")
+        }
     }
 }
 
@@ -599,17 +704,31 @@ extension DocumentWindowController: NSMenuItemValidation {
             menuItem.state = isTwoPageView ? .on : .off
             return currentURL != nil
         }
+        if menuItem.action == #selector(openSideBySide(_:)) {
+            return currentURL != nil
+        }
+        if menuItem.action == #selector(closeSideBySide(_:)) {
+            return secondaryPane != nil
+        }
+        if menuItem.action == #selector(toggleSyncLock(_:)) || menuItem.action == #selector(toggleSyncScrolling(_:)) {
+            menuItem.title = isSyncLocked ? "Lock Sync" : "Lock Sync"
+            menuItem.state = isSyncLocked ? .on : .off
+            return secondaryPane != nil
+        }
+        if menuItem.action == #selector(resetAlignmentOffset(_:)) {
+            return secondaryPane != nil
+        }
         return true
     }
 }
 
 extension DocumentWindowController: NSToolbarDelegate {
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDocument, .goToPage, .pageViewMode, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
+        [.openDocument, .openSideBySide, .syncLock, .goToPage, .pageViewMode, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDocument, .goToPage, .pageViewMode, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
+        [.openDocument, .openSideBySide, .syncLock, .goToPage, .pageViewMode, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
     }
 
     func toolbar(
@@ -627,6 +746,18 @@ extension DocumentWindowController: NSToolbarDelegate {
             item.toolTip = "Open a DVI, XDV, PostScript, or PDF file"
             item.image = NSImage(systemSymbolName: "doc.badge.plus", accessibilityDescription: "Open")
             item.action = #selector(openDocument(_:))
+        case .openSideBySide:
+            item.label = "Side by Side"
+            item.paletteLabel = "Open Side by Side"
+            item.toolTip = "Open second document side by side (⌥⌘O)"
+            item.image = NSImage(systemSymbolName: "square.split.2x1", accessibilityDescription: "Side by Side")
+            item.action = #selector(openSideBySide(_:))
+        case .syncLock:
+            item.label = isSyncLocked ? "Unlock Sync" : "Lock Sync"
+            item.paletteLabel = "Lock / Unlock Sync"
+            item.toolTip = isSyncLocked ? "Unlock to manually align pages (⌥⌘S)" : "Lock pages in sync (⌥⌘S)"
+            item.image = NSImage(systemSymbolName: isSyncLocked ? "lock.fill" : "lock.open", accessibilityDescription: "Sync Lock")
+            item.action = #selector(toggleSyncLock(_:))
         case .goToPage:
             item.label = "Go to Page"
             item.paletteLabel = "Go to Page"
@@ -683,8 +814,28 @@ extension DocumentWindowController: NSToolbarDelegate {
     }
 }
 
+extension DocumentWindowController: NSToolbarItemValidation {
+    func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        if item.itemIdentifier == .syncLock {
+            item.label = isSyncLocked ? "Unlock Sync" : "Lock Sync"
+            item.paletteLabel = "Lock / Unlock Sync"
+            item.image = NSImage(
+                systemSymbolName: isSyncLocked ? "lock.fill" : "lock.open",
+                accessibilityDescription: isSyncLocked ? "Unlock Sync" : "Lock Sync"
+            )
+            item.toolTip = isSyncLocked
+                ? "Unlock to manually align pages (⌥⌘S)"
+                : "Lock pages in sync at current alignment (⌥⌘S)"
+            return secondaryPane != nil
+        }
+        return true
+    }
+}
+
 private extension NSToolbarItem.Identifier {
     static let openDocument = NSToolbarItem.Identifier("macDVI.toolbar.open")
+    static let openSideBySide = NSToolbarItem.Identifier("macDVI.toolbar.openSideBySide")
+    static let syncLock = NSToolbarItem.Identifier("macDVI.toolbar.syncLock")
     static let goToPage = NSToolbarItem.Identifier("macDVI.toolbar.goToPage")
     static let pageViewMode = NSToolbarItem.Identifier("macDVI.toolbar.pageViewMode")
     static let zoomOut = NSToolbarItem.Identifier("macDVI.toolbar.zoomOut")
