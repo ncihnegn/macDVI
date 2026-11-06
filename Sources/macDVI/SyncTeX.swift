@@ -360,8 +360,10 @@ enum SyncTeXEditorOpener {
         let fileURL = URL(fileURLWithPath: file)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
 
-        // 1. Check custom editor in environment
-        if let customEditor = ProcessInfo.processInfo.environment["MACDVI_EDITOR"], !customEditor.isEmpty {
+        // 1. Check custom editor in environment or settings
+        let customEnv = ProcessInfo.processInfo.environment["MACDVI_EDITOR"]
+        let customSetting = AppSettings.shared.selectedEditor == .custom ? AppSettings.shared.customEditorCommand : nil
+        if let customEditor = customEnv ?? customSetting, !customEditor.isEmpty {
             let cmd = customEditor
                 .replacingOccurrences(of: "%file", with: fileURL.path)
                 .replacingOccurrences(of: "%line", with: "\(line)")
@@ -373,71 +375,70 @@ enum SyncTeXEditorOpener {
             return
         }
 
-        // 2. Check for VS Code (code)
+        // 2. Check explicitly selected editor in Settings
+        let selected = AppSettings.shared.selectedEditor
+        if selected == .vscode, let codePath = findExecutable(named: "code") {
+            openExecutable(codePath, arguments: ["-g", "\(fileURL.path):\(line):\(column)"])
+            return
+        } else if selected == .cursor, let cursorPath = findExecutable(named: "cursor") {
+            openExecutable(cursorPath, arguments: ["-g", "\(fileURL.path):\(line):\(column)"])
+            return
+        } else if selected == .zed, let zedPath = findExecutable(named: "zed") {
+            openExecutable(zedPath, arguments: ["\(fileURL.path):\(line):\(column)"])
+            return
+        } else if selected == .sublime, let sublPath = findExecutable(named: "subl") {
+            openExecutable(sublPath, arguments: ["\(fileURL.path):\(line):\(column)"])
+            return
+        } else if selected == .macvim, let mvimPath = findExecutable(named: "mvim") {
+            openExecutable(mvimPath, arguments: ["+\(line)", fileURL.path])
+            return
+        } else if selected == .bbedit, let bbeditPath = findExecutable(named: "bbedit") {
+            openExecutable(bbeditPath, arguments: ["+\(line)", fileURL.path])
+            return
+        } else if selected == .emacs, let emacsPath = findExecutable(named: "emacsclient") {
+            openExecutable(emacsPath, arguments: ["-n", "+\(line):\(column)", fileURL.path])
+            return
+        }
+
+        // 3. Fallback: Auto-detect available editor
         if let codePath = findExecutable(named: "code") {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: codePath)
-            task.arguments = ["-g", "\(fileURL.path):\(line):\(column)"]
-            try? task.run()
+            openExecutable(codePath, arguments: ["-g", "\(fileURL.path):\(line):\(column)"])
             return
         }
-
-        // 3. Check for Cursor (cursor)
         if let cursorPath = findExecutable(named: "cursor") {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: cursorPath)
-            task.arguments = ["-g", "\(fileURL.path):\(line):\(column)"]
-            try? task.run()
+            openExecutable(cursorPath, arguments: ["-g", "\(fileURL.path):\(line):\(column)"])
             return
         }
-
-        // 4. Check for Zed (zed)
         if let zedPath = findExecutable(named: "zed") {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: zedPath)
-            task.arguments = ["\(fileURL.path):\(line):\(column)"]
-            try? task.run()
+            openExecutable(zedPath, arguments: ["\(fileURL.path):\(line):\(column)"])
             return
         }
-
-        // 5. Check for Sublime Text (subl)
         if let sublPath = findExecutable(named: "subl") {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: sublPath)
-            task.arguments = ["\(fileURL.path):\(line):\(column)"]
-            try? task.run()
+            openExecutable(sublPath, arguments: ["\(fileURL.path):\(line):\(column)"])
             return
         }
-
-        // 6. Check for MacVim (mvim)
         if let mvimPath = findExecutable(named: "mvim") {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: mvimPath)
-            task.arguments = ["+\(line)", fileURL.path]
-            try? task.run()
+            openExecutable(mvimPath, arguments: ["+\(line)", fileURL.path])
             return
         }
-
-        // 7. Check for BBEdit (bbedit)
         if let bbeditPath = findExecutable(named: "bbedit") {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: bbeditPath)
-            task.arguments = ["+\(line)", fileURL.path]
-            try? task.run()
+            openExecutable(bbeditPath, arguments: ["+\(line)", fileURL.path])
             return
         }
-
-        // 8. Check for Emacsclient (emacsclient)
         if let emacsPath = findExecutable(named: "emacsclient") {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: emacsPath)
-            task.arguments = ["-n", "+\(line):\(column)", fileURL.path]
-            try? task.run()
+            openExecutable(emacsPath, arguments: ["-n", "+\(line):\(column)", fileURL.path])
             return
         }
 
-        // 9. Fallback to NSWorkspace
+        // 4. Fallback to NSWorkspace
         NSWorkspace.shared.open(fileURL)
+    }
+
+    private static func openExecutable(_ path: String, arguments: [String]) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: path)
+        task.arguments = arguments
+        try? task.run()
     }
 
     private static func findExecutable(named name: String) -> String? {

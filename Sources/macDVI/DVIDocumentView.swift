@@ -224,13 +224,14 @@ final class DVIDocumentView: NSView {
             height: CGFloat(hRect.height) * zoom
         )
         let path = CGPath(roundedRect: drawRect, cornerWidth: 3, cornerHeight: 3, transform: nil)
+        let color = AppSettings.shared.highlightColor.color
         context.saveGState()
         context.addPath(path)
-        context.setFillColor(NSColor.systemBlue.withAlphaComponent(0.35).cgColor)
+        context.setFillColor(color.withAlphaComponent(0.35).cgColor)
         context.fillPath()
 
         context.addPath(path)
-        context.setStrokeColor(NSColor.systemBlue.withAlphaComponent(0.85).cgColor)
+        context.setStrokeColor(color.withAlphaComponent(0.85).cgColor)
         context.setLineWidth(1.5)
         context.strokePath()
         context.restoreGState()
@@ -240,7 +241,8 @@ final class DVIDocumentView: NSView {
         synctexHighlightPageIndex = pageIndex
         synctexHighlightRect = rect
         synctexHighlightTimer?.invalidate()
-        synctexHighlightTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+        let duration = AppSettings.shared.highlightDuration
+        synctexHighlightTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
             self?.synctexHighlightRect = nil
             self?.synctexHighlightPageIndex = nil
         }

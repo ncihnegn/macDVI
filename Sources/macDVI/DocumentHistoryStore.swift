@@ -6,10 +6,10 @@ enum DocumentHistoryStore {
 
     static var isTwoPageViewEnabled: Bool {
         get {
-            UserDefaults.standard.bool(forKey: twoPageViewKey)
+            AppSettings.shared.isTwoPageViewEnabled
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: twoPageViewKey)
+            AppSettings.shared.isTwoPageViewEnabled = newValue
         }
     }
 
@@ -21,14 +21,21 @@ enum DocumentHistoryStore {
 
     /// Retrieves the 0-based page index last viewed for the given file URL.
     static func lastViewedPage(for url: URL) -> Int? {
+        guard AppSettings.shared.isRememberPageEnabled else { return nil }
         let dict = UserDefaults.standard.dictionary(forKey: userDefaultsKey) as? [String: Int] ?? [:]
         return dict[storageKey(for: url)]
     }
 
     /// Records the 0-based page index for the given file URL.
     static func setLastViewedPage(_ pageIndex: Int, for url: URL) {
+        guard AppSettings.shared.isRememberPageEnabled else { return }
         var dict = UserDefaults.standard.dictionary(forKey: userDefaultsKey) as? [String: Int] ?? [:]
         dict[storageKey(for: url)] = pageIndex
         UserDefaults.standard.set(dict, forKey: userDefaultsKey)
+    }
+
+    /// Clears all recorded reading history.
+    static func clearHistory() {
+        UserDefaults.standard.removeObject(forKey: userDefaultsKey)
     }
 }

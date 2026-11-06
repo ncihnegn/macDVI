@@ -1095,15 +1095,17 @@ final class MacDVIPDFView: PDFView {
 
         let overlay = NSView(frame: parentRect)
         overlay.wantsLayer = true
-        overlay.layer?.backgroundColor = NSColor.systemBlue.withAlphaComponent(0.35).cgColor
-        overlay.layer?.borderColor = NSColor.systemBlue.withAlphaComponent(0.85).cgColor
+        let color = AppSettings.shared.highlightColor.color
+        overlay.layer?.backgroundColor = color.withAlphaComponent(0.35).cgColor
+        overlay.layer?.borderColor = color.withAlphaComponent(0.85).cgColor
         overlay.layer?.borderWidth = 1.5
         overlay.layer?.cornerRadius = 3.0
 
         targetParent.addSubview(overlay)
         highlightOverlayView = overlay
 
-        highlightTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self, weak overlay] _ in
+        let duration = AppSettings.shared.highlightDuration
+        highlightTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self, weak overlay] _ in
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.3
                 overlay?.animator().alphaValue = 0.0

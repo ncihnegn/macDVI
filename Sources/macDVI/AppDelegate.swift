@@ -278,6 +278,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenu()
         appMenu.addItem(NSMenuItem(title: "About macDVI", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
         appMenu.addItem(.separator())
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings(_:)), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
+        let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
+        let servicesMenu = NSMenu(title: "Services")
+        servicesItem.submenu = servicesMenu
+        NSApp.servicesMenu = servicesMenu
+        appMenu.addItem(servicesItem)
+        appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(title: "Hide macDVI", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
+        let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthersItem)
+        appMenu.addItem(NSMenuItem(title: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: ""))
+        appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Quit macDVI", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
@@ -454,6 +470,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         goItem.submenu = goMenu
         mainMenu.addItem(goItem)
 
+        let settingsMenuItem = NSMenuItem()
+        let settingsMenu = NSMenu(title: "Settings")
+        settingsMenuItem.title = "Settings"
+        settingsMenu.delegate = self
+        populateSettingsMenu(settingsMenu)
+        settingsMenuItem.submenu = settingsMenu
+        mainMenu.addItem(settingsMenuItem)
+
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
         windowItem.title = "Window"
@@ -516,12 +540,152 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clearItem.isEnabled = !recentURLs.isEmpty
         menu.addItem(clearItem)
     }
+
+    @objc func openSettings(_ sender: Any?) {
+        SettingsWindowController.shared.showWindow(sender)
+    }
+
+    private func populateSettingsMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+
+        let openSettingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings(_:)), keyEquivalent: ",")
+        openSettingsItem.target = self
+        menu.addItem(openSettingsItem)
+        menu.addItem(.separator())
+
+        // Default Page View Submenu
+        let pageViewItem = NSMenuItem(title: "Default Page View", action: nil, keyEquivalent: "")
+        let pageViewSubmenu = NSMenu(title: "Default Page View")
+        let singlePageItem = NSMenuItem(title: "Single Page", action: #selector(selectSettingsPageViewMode(_:)), keyEquivalent: "")
+        singlePageItem.target = self
+        singlePageItem.tag = 0
+        singlePageItem.state = AppSettings.shared.isTwoPageViewEnabled ? .off : .on
+        let twoPagesItem = NSMenuItem(title: "Two Pages", action: #selector(selectSettingsPageViewMode(_:)), keyEquivalent: "")
+        twoPagesItem.target = self
+        twoPagesItem.tag = 1
+        twoPagesItem.state = AppSettings.shared.isTwoPageViewEnabled ? .on : .off
+        pageViewSubmenu.addItem(singlePageItem)
+        pageViewSubmenu.addItem(twoPagesItem)
+        pageViewItem.submenu = pageViewSubmenu
+        menu.addItem(pageViewItem)
+
+        // Auto-scale toggle
+        let autoScaleItem = NSMenuItem(title: "Auto-Scale to Window Width", action: #selector(toggleSettingsAutoScales(_:)), keyEquivalent: "")
+        autoScaleItem.target = self
+        autoScaleItem.state = AppSettings.shared.isAutoScalesEnabled ? .on : .off
+        menu.addItem(autoScaleItem)
+
+        // Remember page toggle
+        let rememberItem = NSMenuItem(title: "Remember Last Viewed Page", action: #selector(toggleSettingsRememberPage(_:)), keyEquivalent: "")
+        rememberItem.target = self
+        rememberItem.state = AppSettings.shared.isRememberPageEnabled ? .on : .off
+        menu.addItem(rememberItem)
+
+        menu.addItem(.separator())
+
+        // TeX Editor Submenu
+        let editorItem = NSMenuItem(title: "TeX Editor", action: nil, keyEquivalent: "")
+        let editorSubmenu = NSMenu(title: "TeX Editor")
+        for choice in TeXEditorChoice.allCases {
+            let it = NSMenuItem(title: choice.rawValue, action: #selector(selectSettingsEditor(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = choice
+            it.state = (AppSettings.shared.selectedEditor == choice) ? .on : .off
+            editorSubmenu.addItem(it)
+        }
+        editorItem.submenu = editorSubmenu
+        menu.addItem(editorItem)
+
+        // Highlight Color Submenu
+        let colorItem = NSMenuItem(title: "SyncTeX Highlight Color", action: nil, keyEquivalent: "")
+        let colorSubmenu = NSMenu(title: "SyncTeX Highlight Color")
+        for color in SyncTeXHighlightColor.allCases {
+            let it = NSMenuItem(title: color.rawValue, action: #selector(selectSettingsHighlightColor(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = color
+            it.state = (AppSettings.shared.highlightColor == color) ? .on : .off
+            colorSubmenu.addItem(it)
+        }
+        colorItem.submenu = colorSubmenu
+        menu.addItem(colorItem)
+
+        // Highlight Duration Submenu
+        let durationItem = NSMenuItem(title: "SyncTeX Highlight Duration", action: nil, keyEquivalent: "")
+        let durationSubmenu = NSMenu(title: "SyncTeX Highlight Duration")
+        let durations: [(title: String, val: TimeInterval)] = [
+            ("1 Second", 1.0),
+            ("2 Seconds", 2.0),
+            ("3 Seconds", 3.0),
+            ("5 Seconds", 5.0)
+        ]
+        let currentDuration = AppSettings.shared.highlightDuration
+        for d in durations {
+            let it = NSMenuItem(title: d.title, action: #selector(selectSettingsHighlightDuration(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = d.val
+            it.state = (abs(currentDuration - d.val) < 0.1) ? .on : .off
+            durationSubmenu.addItem(it)
+        }
+        durationItem.submenu = durationSubmenu
+        menu.addItem(durationItem)
+
+        menu.addItem(.separator())
+
+        let clearHistoryItem = NSMenuItem(title: "Clear Reading History…", action: #selector(clearReadingHistoryAction(_:)), keyEquivalent: "")
+        clearHistoryItem.target = self
+        menu.addItem(clearHistoryItem)
+    }
+
+    @objc private func selectSettingsPageViewMode(_ sender: NSMenuItem) {
+        AppSettings.shared.isTwoPageViewEnabled = (sender.tag == 1)
+    }
+
+    @objc private func toggleSettingsAutoScales(_ sender: NSMenuItem) {
+        AppSettings.shared.isAutoScalesEnabled.toggle()
+    }
+
+    @objc private func toggleSettingsRememberPage(_ sender: NSMenuItem) {
+        AppSettings.shared.isRememberPageEnabled.toggle()
+    }
+
+    @objc private func selectSettingsEditor(_ sender: NSMenuItem) {
+        if let choice = sender.representedObject as? TeXEditorChoice {
+            AppSettings.shared.selectedEditor = choice
+        }
+    }
+
+    @objc private func selectSettingsHighlightColor(_ sender: NSMenuItem) {
+        if let color = sender.representedObject as? SyncTeXHighlightColor {
+            AppSettings.shared.highlightColor = color
+        }
+    }
+
+    @objc private func selectSettingsHighlightDuration(_ sender: NSMenuItem) {
+        if let val = sender.representedObject as? TimeInterval {
+            AppSettings.shared.highlightDuration = val
+        }
+    }
+
+    @objc private func clearReadingHistoryAction(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "Clear Reading History"
+        alert.informativeText = "Are you sure you want to clear the saved page positions for all documents?"
+        alert.addButton(withTitle: "Clear History")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            DocumentHistoryStore.clearHistory()
+        }
+    }
 }
 
 extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         if menu.title == "Open Recent" {
             populateRecentDocumentsMenu(menu)
+        } else if menu.title == "Settings" {
+            populateSettingsMenu(menu)
         }
     }
 }
@@ -587,6 +751,9 @@ private final class MainMenu: NSMenu {
         }
         if title == "Window" {
             return super.item(withTitle: "Windows")
+        }
+        if title == "Preferences" || title == "Preference" {
+            return super.item(withTitle: "Settings")
         }
         return nil
     }
