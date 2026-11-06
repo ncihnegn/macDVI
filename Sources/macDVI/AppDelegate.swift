@@ -23,14 +23,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleDistributedOpenFile(_:)),
+            name: Notification.Name("com.macDVI.openFile"),
+            object: nil
+        )
+
         let urls = pendingFileURLs
         pendingFileURLs.removeAll()
-        if urls.count == 2 {
+        if urls.count == 2 && !urls[0].matchesDocumentURL(urls[1]) {
             let controller = newWindow(opening: urls[0])
             controller.openSideBySide(url: urls[1])
         } else {
             for url in urls {
-                newWindow(opening: url)
+                openDocument(at: url)
             }
         }
         if controllers.isEmpty {
@@ -60,7 +67,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func controller(for url: URL) -> DocumentWindowController? {
+        controllers.first { $0.containsDocument(url: url) }
+    }
+
     func openDocument(at url: URL) {
+        if let existing = controller(for: url) {
+            existing.focusDocument(url: url)
+            return
+        }
+
         if let emptyController = controllers.first(where: { $0.currentURL == nil }) {
             emptyController.window?.makeKeyAndOrderFront(nil)
             emptyController.openDocument(url: url)
@@ -229,15 +245,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         forwardSync(docURL: docURL, sourceFile: file, line: line, column: col)
     }
 
+    @objc private func handleDistributedOpenFile(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let filePath = userInfo["file"] as? String else { return }
+        let url = URL(fileURLWithPath: filePath)
+        NSApp.activate(ignoringOtherApps: true)
+        openDocument(at: url)
+    }
+
     @discardableResult
     func forwardSync(docURL: URL?, sourceFile: String, line: Int, column: Int? = nil) -> Bool {
         if let docURL {
-            let standardDoc = docURL.standardizedFileURL
-            if let controller = controllers.first(where: {
-                $0.currentURL?.standardizedFileURL == standardDoc ||
-                $0.currentURL?.lastPathComponent == docURL.lastPathComponent
-            }) {
-                controller.window?.makeKeyAndOrderFront(nil)
+            if let controller = controller(for: docURL) {
+                controller.focusDocument(url: docURL)
                 return controller.forwardSync(sourceFile: sourceFile, line: line, column: column)
             } else {
                 let controller = newWindow(opening: docURL)

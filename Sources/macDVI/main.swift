@@ -339,6 +339,28 @@ if let fwdDocURL = initialSyncTeXForward?.docURL, !fileURLs.contains(fwdDocURL) 
     fileURLs.insert(fwdDocURL, at: 0)
 }
 
+if !fileURLs.isEmpty {
+    let myPid = ProcessInfo.processInfo.processIdentifier
+    let runningInstance = NSWorkspace.shared.runningApplications.first { app in
+        (app.bundleIdentifier == "com.macDVI" || app.localizedName == "macDVI") &&
+        app.processIdentifier != myPid
+    }
+
+    if let running = runningInstance {
+        for url in fileURLs {
+            DistributedNotificationCenter.default().postNotificationName(
+                Notification.Name("com.macDVI.openFile"),
+                object: nil,
+                userInfo: ["file": url.path],
+                deliverImmediately: true
+            )
+        }
+        running.activate(options: [.activateIgnoringOtherApps])
+        usleep(50_000)
+        exit(0)
+    }
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate(initialFileURLs: fileURLs, initialSyncTeXForward: initialSyncTeXForward)
 app.delegate = delegate

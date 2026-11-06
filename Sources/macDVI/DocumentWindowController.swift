@@ -34,6 +34,35 @@ final class DocumentWindowController: NSWindowController {
         return primaryPane
     }
 
+    func containsDocument(url: URL) -> Bool {
+        if let primaryURL = primaryPane.currentURL, primaryURL.matchesDocumentURL(url) {
+            return true
+        }
+        if let secondaryURL = secondaryPane?.currentURL, secondaryURL.matchesDocumentURL(url) {
+            return true
+        }
+        return false
+    }
+
+    func focusDocument(url: URL) {
+        guard let window else { return }
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        if let secondary = secondaryPane,
+           let secondaryURL = secondary.currentURL,
+           secondaryURL.matchesDocumentURL(url) {
+            updatePaneFocus(activePane: secondary)
+            secondary.makeFirstResponder()
+        } else {
+            updatePaneFocus(activePane: primaryPane)
+            primaryPane.makeFirstResponder()
+        }
+    }
+
     init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1040, height: 760),
@@ -201,6 +230,19 @@ final class DocumentWindowController: NSWindowController {
     }
 
     func openDocument(url: URL) {
+        if containsDocument(url: url) {
+            focusDocument(url: url)
+            return
+        }
+        if let delegate = NSApp.delegate as? AppDelegate,
+           let existing = delegate.controller(for: url),
+           existing !== self {
+            existing.focusDocument(url: url)
+            if currentURL == nil && secondaryPane == nil {
+                window?.close()
+            }
+            return
+        }
         saveCurrentPage()
         if secondaryPane == nil {
             layoutSinglePane()
@@ -955,4 +997,18 @@ private extension NSToolbarItem.Identifier {
     static let actualSize = NSToolbarItem.Identifier("macDVI.toolbar.actualSize")
     static let zoomToFit = NSToolbarItem.Identifier("macDVI.toolbar.zoomToFit")
     static let zoomIn = NSToolbarItem.Identifier("macDVI.toolbar.zoomIn")
+}
+
+extension URL {
+    func matchesDocumentURL(_ other: URL) -> Bool {
+        if self == other { return true }
+        let p1 = self.standardizedFileURL.resolvingSymlinksInPath().path
+        let p2 = other.standardizedFileURL.resolvingSymlinksInPath().path
+        if p1 == p2 { return true }
+        if let id1 = try? self.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier,
+           let id2 = try? other.resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier {
+            return (id1 as AnyObject).isEqual(id2)
+        }
+        return false
+    }
 }
