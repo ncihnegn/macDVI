@@ -77,6 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSDocumentController.shared.clearRecentDocuments(sender)
     }
 
+    @objc func newWindow(_ sender: Any?) {
+        newWindow(opening: nil)
+    }
+
     @objc func openDocument(_ sender: Any?) {
         if let emptyController = controllers.first(where: { $0.currentURL == nil }) {
             emptyController.window?.makeKeyAndOrderFront(nil)
@@ -199,7 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func buildMenu() {
-        let mainMenu = NSMenu()
+        let mainMenu = MainMenu()
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
@@ -211,6 +215,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let fileItem = NSMenuItem()
         let fileMenu = NSMenu(title: "File")
+        let newWindowItem = NSMenuItem(title: "New Window", action: #selector(newWindow(_:)), keyEquivalent: "n")
+        newWindowItem.target = self
+        fileMenu.addItem(newWindowItem)
+
         let openItem = NSMenuItem(title: "Open…", action: #selector(openDocument(_:)), keyEquivalent: "o")
         openItem.target = self
         fileMenu.addItem(openItem)
@@ -368,6 +376,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         goItem.submenu = goMenu
         mainMenu.addItem(goItem)
 
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowItem.title = "Window"
+
+        let minimizeItem = NSMenuItem(
+            title: "Minimize",
+            action: #selector(NSWindow.performMiniaturize(_:)),
+            keyEquivalent: "m"
+        )
+        let zoomItem = NSMenuItem(
+            title: "Zoom",
+            action: #selector(NSWindow.performZoom(_:)),
+            keyEquivalent: ""
+        )
+        let bringAllItem = NSMenuItem(
+            title: "Bring All to Front",
+            action: #selector(NSApplication.arrangeInFront(_:)),
+            keyEquivalent: ""
+        )
+
+        windowMenu.addItem(minimizeItem)
+        windowMenu.addItem(zoomItem)
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(bringAllItem)
+        windowMenu.addItem(.separator())
+
+        windowItem.submenu = windowMenu
+        mainMenu.addItem(windowItem)
+
+        NSApp.windowsMenu = windowMenu
         NSApp.mainMenu = mainMenu
     }
 
@@ -452,5 +490,20 @@ extension AppDelegate: NSWindowDelegate {
             controller.saveCurrentPage()
         }
         controllers.removeAll { $0.window === window }
+    }
+}
+
+private final class MainMenu: NSMenu {
+    override func item(withTitle title: String) -> NSMenuItem? {
+        if let item = super.item(withTitle: title) {
+            return item
+        }
+        if title == "Windows" {
+            return super.item(withTitle: "Window")
+        }
+        if title == "Window" {
+            return super.item(withTitle: "Windows")
+        }
+        return nil
     }
 }

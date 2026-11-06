@@ -672,6 +672,7 @@ final class DocumentWindowController: NSWindowController {
         guard let primaryURL = primaryPane.currentURL else {
             statusField.stringValue = "No document open"
             window?.title = "macDVI"
+            window?.representedURL = nil
             return
         }
 
@@ -684,6 +685,7 @@ final class DocumentWindowController: NSWindowController {
             let sTotal = secondary.totalPages
 
             window?.title = "\(primaryURL.lastPathComponent) ↔ \(secURL.lastPathComponent)"
+            window?.representedURL = nil
 
             var parts: [String] = []
             parts.append("\(primaryURL.lastPathComponent) (Page \(pCurrent)/\(pTotal))")
@@ -699,6 +701,7 @@ final class DocumentWindowController: NSWindowController {
             statusField.stringValue = parts.joined(separator: " ")
         } else {
             window?.title = primaryURL.lastPathComponent
+            window?.representedURL = primaryURL
 
             var parts: [String] = []
             if pTotal > 0 {
