@@ -421,6 +421,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewMenu.addItem(syncLockItem)
         viewMenu.addItem(resetAlignmentItem)
 
+        viewMenu.addItem(.separator())
+        let fullScreenItem = NSMenuItem(
+            title: "Enter Full Screen",
+            action: #selector(NSWindow.toggleFullScreen(_:)),
+            keyEquivalent: "f"
+        )
+        fullScreenItem.keyEquivalentModifierMask = [.command, .control]
+        viewMenu.addItem(fullScreenItem)
+
         viewItem.submenu = viewMenu
         mainMenu.addItem(viewItem)
 
@@ -750,6 +759,10 @@ extension AppDelegate: NSMenuItemValidation {
 }
 
 extension AppDelegate: NSWindowDelegate {
+    func window(_ window: NSWindow, willUseFullScreenPresentationOptions proposedOptions: NSApplication.PresentationOptions = []) -> NSApplication.PresentationOptions {
+        return [.autoHideToolbar, .autoHideMenuBar, .fullScreen]
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
         if let controller = controllers.first(where: { $0.window === window }) {
