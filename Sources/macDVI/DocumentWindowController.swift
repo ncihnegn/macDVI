@@ -506,6 +506,14 @@ final class DocumentWindowController: NSWindowController {
         updateStatusForCurrentDocument()
     }
 
+    var canGoNextPage: Bool {
+        focusedPane.canGoNextPage
+    }
+
+    var canGoPreviousPage: Bool {
+        focusedPane.canGoPreviousPage
+    }
+
     @objc func nextPage(_ sender: Any?) {
         if isSyncLocked, let sec = secondaryPane {
             isSyncing = true
@@ -756,6 +764,12 @@ extension DocumentWindowController: NSMenuItemValidation {
             menuItem.action == #selector(findPrevious(_:)) ||
             menuItem.action == #selector(useSelectionForFind(_:)) {
             return currentURL != nil
+        }
+        if menuItem.action == #selector(nextPage(_:)) {
+            return canGoNextPage
+        }
+        if menuItem.action == #selector(previousPage(_:)) {
+            return canGoPreviousPage
         }
         return true
     }

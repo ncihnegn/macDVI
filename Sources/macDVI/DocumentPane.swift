@@ -22,6 +22,10 @@ final class DocumentPane: NSObject {
     private var isRestoringPage = false
     private var headerHeightConstraint: NSLayoutConstraint?
 
+    let navigationHistory = PageNavigationHistory()
+    private var isNavigatingHistory = false
+    private var pageSettleTimer: Timer?
+
     let findBar = FindBarView()
     private var findBarHeightConstraint: NSLayoutConstraint?
     private let dviSearchEngine = DVISearchEngine()
@@ -349,9 +353,15 @@ final class DocumentPane: NSObject {
                 guard let self, let pv else { return }
                 self.positionPDFViewAtTop(pv, page: targetPage)
                 DispatchQueue.main.async { [weak self] in
-                    self?.isRestoringPage = false
+                    guard let self else { return }
+                    self.isRestoringPage = false
+                    self.navigationHistory.clear()
+                    self.navigationHistory.record(pageNumber: targetIndex + 1)
                 }
             }
+        } else {
+            navigationHistory.clear()
+            navigationHistory.record(pageNumber: 1)
         }
 
         pdfPageChangeObserver = NotificationCenter.default.addObserver(
@@ -362,6 +372,7 @@ final class DocumentPane: NSObject {
             guard let self else { return }
             self.saveCurrentPage()
             self.updateBadge()
+            self.schedulePageSettleRecording()
             self.onPageChange?(self)
         }
 
@@ -425,7 +436,10 @@ final class DocumentPane: NSObject {
             guard let self, let dv else { return }
             dv.scrollToPage(index: targetIndex)
             DispatchQueue.main.async { [weak self] in
-                self?.isRestoringPage = false
+                guard let self else { return }
+                self.isRestoringPage = false
+                self.navigationHistory.clear()
+                self.navigationHistory.record(pageNumber: targetIndex + 1)
             }
         }
 
@@ -438,6 +452,7 @@ final class DocumentPane: NSObject {
             guard let self, !self.isRestoringPage else { return }
             self.saveCurrentPage()
             self.updateBadge()
+            self.schedulePageSettleRecording()
             self.onScroll?(self)
             self.onPageChange?(self)
         }
@@ -470,6 +485,8 @@ final class DocumentPane: NSObject {
     }
 
     func cleanUpObservers() {
+        pageSettleTimer?.invalidate()
+        pageSettleTimer = nil
         if let o = pdfPageChangeObserver {
             NotificationCenter.default.removeObserver(o)
             pdfPageChangeObserver = nil
@@ -585,24 +602,45 @@ final class DocumentPane: NSObject {
         updateBadge()
     }
 
-    func nextPage(_ sender: Any?) {
-        if let pv = pdfView {
-            pv.goToNextPage(sender)
-        }
-        if let dv = dviView {
-            dv.goToNextPage()
-        }
-        updateBadge()
+    var canGoNextPage: Bool {
+        navigationHistory.canGoForward
     }
 
-    func previousPage(_ sender: Any?) {
-        if let pv = pdfView {
-            pv.goToPreviousPage(sender)
+    var canGoPreviousPage: Bool {
+        let current = currentPageNumber
+        if current > 0 && navigationHistory.currentPage != current && navigationHistory.currentPage != nil {
+            return true
         }
-        if let dv = dviView {
-            dv.goToPreviousPage()
+        return navigationHistory.canGoBack
+    }
+
+    func nextPage(_ sender: Any? = nil) {
+        guard navigationHistory.canGoForward, let targetPage = navigationHistory.goForward() else {
+            return
         }
+        pageSettleTimer?.invalidate()
+        isNavigatingHistory = true
+        jumpToPageInternal(targetPage)
+        isNavigatingHistory = false
         updateBadge()
+        onPageChange?(self)
+    }
+
+    func previousPage(_ sender: Any? = nil) {
+        let current = currentPageNumber
+        if current > 0 && navigationHistory.currentPage != current {
+            navigationHistory.record(pageNumber: current)
+        }
+
+        guard navigationHistory.canGoBack, let targetPage = navigationHistory.goBack() else {
+            return
+        }
+        pageSettleTimer?.invalidate()
+        isNavigatingHistory = true
+        jumpToPageInternal(targetPage)
+        isNavigatingHistory = false
+        updateBadge()
+        onPageChange?(self)
     }
 
     func firstPage(_ sender: Any?) {
@@ -629,6 +667,23 @@ final class DocumentPane: NSObject {
         let count = totalPages
         guard count > 0 else { return }
         let clamped = max(min(pageNumber, count), 1)
+
+        if !isNavigatingHistory {
+            pageSettleTimer?.invalidate()
+            let current = currentPageNumber
+            if current > 0 && navigationHistory.currentPage != current {
+                navigationHistory.record(pageNumber: current)
+            }
+            navigationHistory.record(pageNumber: clamped)
+        }
+
+        jumpToPageInternal(clamped)
+    }
+
+    private func jumpToPageInternal(_ pageNumber: Int) {
+        let count = totalPages
+        guard count > 0 else { return }
+        let clamped = max(min(pageNumber, count), 1)
         let targetIndex = clamped - 1
 
         if let dv = dviView {
@@ -639,6 +694,18 @@ final class DocumentPane: NSObject {
             positionPDFViewAtTop(pv, page: targetPage)
             saveCurrentPage()
             updateBadge()
+        }
+    }
+
+    private func schedulePageSettleRecording() {
+        guard !isNavigatingHistory && !isRestoringPage else { return }
+        pageSettleTimer?.invalidate()
+        pageSettleTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: false) { [weak self] _ in
+            guard let self, !self.isNavigatingHistory && !self.isRestoringPage else { return }
+            let current = self.currentPageNumber
+            if current > 0 {
+                self.navigationHistory.record(pageNumber: current)
+            }
         }
     }
 
@@ -864,8 +931,18 @@ final class DocumentPane: NSObject {
     }
 
     private func jumpToPDFMatch(at index: Int) {
-        guard let pv = pdfView, index >= 0, index < pdfMatches.count else { return }
+        guard let pv = pdfView, let doc = pv.document, index >= 0, index < pdfMatches.count else { return }
         let sel = pdfMatches[index]
+        if let page = sel.pages.first {
+            let pageNum = doc.index(for: page) + 1
+            if pageNum > 0 {
+                let current = currentPageNumber
+                if current > 0 && navigationHistory.currentPage != current {
+                    navigationHistory.record(pageNumber: current)
+                }
+                navigationHistory.record(pageNumber: pageNum)
+            }
+        }
         pv.setCurrentSelection(sel, animate: true)
         pv.go(to: sel)
         pv.scrollSelectionToVisible(nil)
@@ -877,6 +954,14 @@ final class DocumentPane: NSObject {
         guard let dv = dviView, index >= 0, index < dviMatches.count else { return }
         dv.activeSearchMatchIndex = index
         let match = dviMatches[index]
+        let pageNum = match.pageIndex + 1
+        if pageNum > 0 {
+            let current = currentPageNumber
+            if current > 0 && navigationHistory.currentPage != current {
+                navigationHistory.record(pageNumber: current)
+            }
+            navigationHistory.record(pageNumber: pageNum)
+        }
         dv.scrollToSearchMatch(match)
         updateBadge()
         onPageChange?(self)

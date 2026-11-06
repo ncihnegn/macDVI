@@ -147,6 +147,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyController?.pageUp(sender)
     }
 
+    var canGoNextPage: Bool {
+        keyController?.canGoNextPage ?? false
+    }
+
+    var canGoPreviousPage: Bool {
+        keyController?.canGoPreviousPage ?? false
+    }
+
     @objc func nextPage(_ sender: Any?) {
         keyController?.nextPage(sender)
     }
@@ -478,6 +486,12 @@ extension AppDelegate: NSMenuItemValidation {
         }
         if menuItem.action == #selector(resetAlignmentOffset(_:)) {
             return keyController?.secondaryPane != nil
+        }
+        if menuItem.action == #selector(nextPage(_:)) {
+            return canGoNextPage
+        }
+        if menuItem.action == #selector(previousPage(_:)) {
+            return canGoPreviousPage
         }
         return true
     }
