@@ -1,5 +1,11 @@
 import AppKit
 
+enum DocumentAutoScaleMode: Equatable {
+    case none
+    case width
+    case height
+}
+
 final class DVIDocumentView: NSView {
     var document: DVIDocument? {
         didSet {
@@ -42,10 +48,26 @@ final class DVIDocumentView: NSView {
         }
     }
 
-    var autoScales: Bool = false {
+    typealias AutoScaleMode = DocumentAutoScaleMode
+
+    var autoScaleMode: AutoScaleMode = .none {
         didSet {
-            guard autoScales else { return }
-            applyZoomToFit()
+            guard autoScaleMode != .none else { return }
+            switch autoScaleMode {
+            case .width:
+                applyZoomToFitWidth()
+            case .height:
+                applyZoomToFitHeight()
+            case .none:
+                break
+            }
+        }
+    }
+
+    var autoScales: Bool {
+        get { autoScaleMode != .none }
+        set {
+            autoScaleMode = newValue ? .width : .none
         }
     }
 
@@ -753,41 +775,69 @@ final class DVIDocumentView: NSView {
     private var isApplyingZoomToFit = false
 
     func applyZoomToFit() {
+        applyZoomToFitWidth()
+    }
+
+    func applyZoomToFitWidth() {
         guard !isApplyingZoomToFit else { return }
         guard let document, !document.pages.isEmpty else { return }
         let clipWidth = enclosingScrollView?.contentView.bounds.width ?? bounds.width
-        let clipHeight = enclosingScrollView?.contentView.bounds.height ?? bounds.height
         let availableWidth = max(clipWidth - pageInset * 2, 100)
-        let availableHeight = max(clipHeight - pageInset * 2, 100)
 
         let targetPage = document.pages[min(currentPageIndex, document.pages.count - 1)]
         let pageWidth: CGFloat
-        let pageHeight: CGFloat
 
         if isTwoPageView {
             let leftW = CGFloat(targetPage.mediaBox.width)
-            let leftH = CGFloat(targetPage.mediaBox.height)
             let nextIdx = (currentPageIndex - (currentPageIndex % 2)) + 1
             if nextIdx < document.pages.count {
                 let rightPage = document.pages[nextIdx]
                 let rightW = CGFloat(rightPage.mediaBox.width)
-                let rightH = CGFloat(rightPage.mediaBox.height)
                 pageWidth = leftW + rightW + pageGap
-                pageHeight = max(leftH, rightH)
             } else {
                 pageWidth = leftW
-                pageHeight = leftH
             }
         } else {
             pageWidth = CGFloat(targetPage.mediaBox.width)
+        }
+
+        guard pageWidth > 0 else { return }
+        let targetZoom = availableWidth / pageWidth
+        let clampedZoom = min(max(targetZoom, 0.1), 8.0)
+
+        if abs(zoom - clampedZoom) > 0.001 {
+            isApplyingZoomToFit = true
+            zoom = clampedZoom
+            isApplyingZoomToFit = false
+        }
+    }
+
+    func applyZoomToFitHeight() {
+        guard !isApplyingZoomToFit else { return }
+        guard let document, !document.pages.isEmpty else { return }
+        let clipHeight = enclosingScrollView?.contentView.bounds.height ?? bounds.height
+        let availableHeight = max(clipHeight - pageInset * 2, 100)
+
+        let targetPage = document.pages[min(currentPageIndex, document.pages.count - 1)]
+        let pageHeight: CGFloat
+
+        if isTwoPageView {
+            let leftH = CGFloat(targetPage.mediaBox.height)
+            let nextIdx = (currentPageIndex - (currentPageIndex % 2)) + 1
+            if nextIdx < document.pages.count {
+                let rightPage = document.pages[nextIdx]
+                let rightH = CGFloat(rightPage.mediaBox.height)
+                pageHeight = max(leftH, rightH)
+            } else {
+                pageHeight = leftH
+            }
+        } else {
             pageHeight = CGFloat(targetPage.mediaBox.height)
         }
 
-        guard pageWidth > 0, pageHeight > 0 else { return }
-        let scaleW = availableWidth / pageWidth
-        let scaleH = availableHeight / pageHeight
-        let targetZoom = min(scaleW, scaleH)
-        let clampedZoom = min(max(targetZoom, 0.25), 5.0)
+        guard pageHeight > 0 else { return }
+        let targetZoom = availableHeight / pageHeight
+        let clampedZoom = min(max(targetZoom, 0.1), 8.0)
 
         if abs(zoom - clampedZoom) > 0.001 {
             isApplyingZoomToFit = true
@@ -803,8 +853,13 @@ final class DVIDocumentView: NSView {
             return
         }
 
-        if autoScales {
-            applyZoomToFit()
+        switch autoScaleMode {
+        case .width:
+            applyZoomToFitWidth()
+        case .height:
+            applyZoomToFitHeight()
+        case .none:
+            break
         }
 
         ensurePageRectsCached()

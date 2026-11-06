@@ -49,13 +49,32 @@ final class DocumentPane: NSObject {
         }
     }
 
-    var autoScales: Bool = false {
+    typealias AutoScaleMode = DocumentAutoScaleMode
+
+    var autoScaleMode: AutoScaleMode = .none {
         didSet {
-            pdfView?.autoScales = autoScales
-            dviView?.autoScales = autoScales
-            if autoScales {
-                dviView?.applyZoomToFit()
+            guard autoScaleMode != .none else {
+                pdfView?.autoScales = false
+                dviView?.autoScaleMode = .none
+                return
             }
+            switch autoScaleMode {
+            case .width:
+                if let pv = pdfView { applyPDFZoomToFitWidth(pv) }
+                dviView?.autoScaleMode = .width
+            case .height:
+                if let pv = pdfView { applyPDFZoomToFitHeight(pv) }
+                dviView?.autoScaleMode = .height
+            case .none:
+                break
+            }
+        }
+    }
+
+    var autoScales: Bool {
+        get { autoScaleMode != .none }
+        set {
+            autoScaleMode = newValue ? .width : .none
         }
     }
 
@@ -220,6 +239,26 @@ final class DocumentPane: NSObject {
             contentContainer.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
             contentContainer.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
         ])
+
+        contentContainer.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(contentContainerFrameDidChange),
+            name: NSView.frameDidChangeNotification,
+            object: contentContainer
+        )
+    }
+
+    @objc private func contentContainerFrameDidChange() {
+        guard let pv = pdfView, autoScaleMode != .none else { return }
+        switch autoScaleMode {
+        case .width:
+            applyPDFZoomToFitWidth(pv)
+        case .height:
+            applyPDFZoomToFitHeight(pv)
+        case .none:
+            break
+        }
     }
 
     @objc private func headerBarClicked() {
@@ -343,7 +382,13 @@ final class DocumentPane: NSObject {
         }
 
         pv.translatesAutoresizingMaskIntoConstraints = false
-        pv.autoScales = autoScales
+        if autoScaleMode == .width {
+            applyPDFZoomToFitWidth(pv)
+        } else if autoScaleMode == .height {
+            applyPDFZoomToFitHeight(pv)
+        } else {
+            pv.autoScales = false
+        }
         pv.displayMode = isTwoPageView ? .twoUpContinuous : .singlePageContinuous
         pv.displaysAsBook = false
         pv.displaysPageBreaks = true
@@ -430,7 +475,7 @@ final class DocumentPane: NSObject {
         let dv = DVIDocumentView(frame: NSRect(x: 0, y: 0, width: 900, height: 700))
         dv.document = document
         dv.isTwoPageView = isTwoPageView
-        dv.autoScales = autoScales
+        dv.autoScaleMode = autoScaleMode
         dv.onCommandClick = { [weak self] pageIndex, pt in
             guard let self else { return }
             let pageNum = pageIndex + 1
@@ -508,6 +553,7 @@ final class DocumentPane: NSObject {
     }
 
     func cleanUpObservers() {
+        NotificationCenter.default.removeObserver(self, name: NSView.frameDidChangeNotification, object: contentContainer)
         pageSettleTimer?.invalidate()
         pageSettleTimer = nil
         if let o = pdfPageChangeObserver {
@@ -570,39 +616,108 @@ final class DocumentPane: NSObject {
     }
 
     func actualSize() {
-        autoScales = false
+        autoScaleMode = .none
         if let pv = pdfView {
+            pv.autoScales = false
             pv.scaleFactor = 1.0
         }
         if let dv = dviView {
+            dv.autoScaleMode = .none
             dv.zoom = 1.0
         }
         onScaleChange?(self)
     }
 
     func zoomToFit() {
-        autoScales = true
+        fitWidth()
+    }
+
+    func zoomToFitWidth() {
+        fitWidth()
+    }
+
+    func zoomToFitHeight() {
+        fitHeight()
+    }
+
+    func fitWidth() {
+        autoScaleMode = .width
         if let pv = pdfView {
-            pv.autoScales = true
+            applyPDFZoomToFitWidth(pv)
         }
         if let dv = dviView {
-            dv.autoScales = true
-            dv.applyZoomToFit()
+            dv.autoScaleMode = .width
+        }
+        onScaleChange?(self)
+    }
+
+    func fitHeight() {
+        autoScaleMode = .height
+        if let pv = pdfView {
+            applyPDFZoomToFitHeight(pv)
+        }
+        if let dv = dviView {
+            dv.autoScaleMode = .height
         }
         onScaleChange?(self)
     }
 
     private func adjustZoom(by multiplier: CGFloat) {
-        autoScales = false
+        autoScaleMode = .none
         if let pv = pdfView {
             pv.autoScales = false
             pv.scaleFactor = min(max(pv.scaleFactor * multiplier, 0.1), 8.0)
         }
         if let dv = dviView {
-            dv.autoScales = false
+            dv.autoScaleMode = .none
             dv.zoom *= multiplier
         }
         onScaleChange?(self)
+    }
+
+    private func applyPDFZoomToFitWidth(_ pv: PDFView) {
+        guard let page = pv.currentPage ?? pv.document?.page(at: 0) else { return }
+        let pageBounds = page.bounds(for: pv.displayBox)
+        var pageWidth = pageBounds.width
+        if page.rotation == 90 || page.rotation == 270 {
+            pageWidth = pageBounds.height
+        }
+        if isTwoPageView {
+            pageWidth = pageWidth * 2 + 16
+        }
+        let clipWidth = (pv.subviews.first(where: { $0 is NSScrollView }) as? NSScrollView)?.contentView.bounds.width ?? pv.bounds.width
+        guard clipWidth > 50 else {
+            DispatchQueue.main.async { [weak self, weak pv] in
+                guard let self, let pv, self.autoScaleMode == .width else { return }
+                self.applyPDFZoomToFitWidth(pv)
+            }
+            return
+        }
+        let availableWidth = max(clipWidth - 24, 100)
+        let scale = availableWidth / max(pageWidth, 1)
+        pv.autoScales = false
+        pv.scaleFactor = min(max(scale, 0.1), 8.0)
+    }
+
+    private func applyPDFZoomToFitHeight(_ pv: PDFView) {
+        guard let page = pv.currentPage ?? pv.document?.page(at: 0) else { return }
+        let pageBounds = page.bounds(for: pv.displayBox)
+        var pageHeight = pageBounds.height
+        if page.rotation == 90 || page.rotation == 270 {
+            pageHeight = pageBounds.width
+        }
+        let clipHeight = (pv.subviews.first(where: { $0 is NSScrollView }) as? NSScrollView)?.contentView.bounds.height ?? pv.bounds.height
+        guard clipHeight > 50 else {
+            DispatchQueue.main.async { [weak self, weak pv] in
+                guard let self, let pv, self.autoScaleMode == .height else { return }
+                self.applyPDFZoomToFitHeight(pv)
+            }
+            return
+        }
+        let availableHeight = max(clipHeight - 24, 100)
+        let scale = availableHeight / max(pageHeight, 1)
+        pv.autoScales = false
+        pv.scaleFactor = min(max(scale, 0.1), 8.0)
     }
 
     func pageDown(_ sender: Any?) {

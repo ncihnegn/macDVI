@@ -160,8 +160,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyController?.actualSize(sender)
     }
 
+    @objc func fitWidth(_ sender: Any?) {
+        keyController?.fitWidth(sender)
+    }
+
+    @objc func fitHeight(_ sender: Any?) {
+        keyController?.fitHeight(sender)
+    }
+
+    @objc func zoomToFitWidth(_ sender: Any?) {
+        keyController?.fitWidth(sender)
+    }
+
+    @objc func zoomToFitHeight(_ sender: Any?) {
+        keyController?.fitHeight(sender)
+    }
+
     @objc func zoomToFit(_ sender: Any?) {
-        keyController?.zoomToFit(sender)
+        keyController?.fitWidth(sender)
     }
 
     @objc func toggleTwoPageView(_ sender: Any?) {
@@ -395,12 +411,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         zoomOutItem.target = self
         let actualSizeItem = NSMenuItem(title: "Actual Size", action: #selector(actualSize(_:)), keyEquivalent: "0")
         actualSizeItem.target = self
-        let zoomToFitItem = NSMenuItem(title: "Zoom to Fit", action: #selector(zoomToFit(_:)), keyEquivalent: "9")
-        zoomToFitItem.target = self
+        let fitWidthItem = NSMenuItem(title: "Fit Width", action: #selector(fitWidth(_:)), keyEquivalent: "9")
+        fitWidthItem.target = self
+        let fitHeightItem = NSMenuItem(title: "Fit Height", action: #selector(fitHeight(_:)), keyEquivalent: "9")
+        fitHeightItem.keyEquivalentModifierMask = [.command, .option]
+        fitHeightItem.target = self
         viewMenu.addItem(zoomInItem)
         viewMenu.addItem(zoomOutItem)
         viewMenu.addItem(actualSizeItem)
-        viewMenu.addItem(zoomToFitItem)
+        viewMenu.addItem(fitWidthItem)
+        viewMenu.addItem(fitHeightItem)
 
         viewMenu.addItem(.separator())
         let singlePageItem = NSMenuItem(title: "Single Page", action: #selector(setSinglePageMode(_:)), keyEquivalent: "1")

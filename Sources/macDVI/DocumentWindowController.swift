@@ -277,6 +277,7 @@ final class DocumentWindowController: NSWindowController {
     func openSideBySide(url: URL) {
         let sec = DocumentPane()
         sec.isTwoPageView = isTwoPageView
+        sec.autoScaleMode = primaryPane.autoScaleMode
         sec.autoScales = primaryPane.autoScales
         sec.showHeader = true
         sec.showCloseButton = true
@@ -456,17 +457,45 @@ final class DocumentWindowController: NSWindowController {
     }
 
     @objc func zoomToFit(_ sender: Any?) {
+        fitWidth(sender)
+    }
+
+    @objc func zoomToFitWidth(_ sender: Any?) {
+        fitWidth(sender)
+    }
+
+    @objc func zoomToFitHeight(_ sender: Any?) {
+        fitHeight(sender)
+    }
+
+    @objc func fitWidth(_ sender: Any?) {
         if isSyncLocked, let sec = secondaryPane {
             isSyncing = true
             defer { isSyncing = false }
             let pPos = primaryPane.continuousPosition
-            primaryPane.zoomToFit()
-            sec.zoomToFit()
+            primaryPane.fitWidth()
+            sec.fitWidth()
             if let pPos {
                 sec.scrollToContinuousPosition(pPos + alignmentOffset)
             }
         } else {
-            focusedPane.zoomToFit()
+            focusedPane.fitWidth()
+        }
+        updateStatusForCurrentDocument()
+    }
+
+    @objc func fitHeight(_ sender: Any?) {
+        if isSyncLocked, let sec = secondaryPane {
+            isSyncing = true
+            defer { isSyncing = false }
+            let pPos = primaryPane.continuousPosition
+            primaryPane.fitHeight()
+            sec.fitHeight()
+            if let pPos {
+                sec.scrollToContinuousPosition(pPos + alignmentOffset)
+            }
+        } else {
+            focusedPane.fitHeight()
         }
         updateStatusForCurrentDocument()
     }
@@ -873,11 +902,11 @@ extension DocumentWindowController: NSMenuItemValidation {
 
 extension DocumentWindowController: NSToolbarDelegate {
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDocument, .openSideBySide, .syncLock, .goToPage, .pageViewMode, .search, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
+        [.openDocument, .openSideBySide, .syncLock, .goToPage, .pageViewMode, .search, .flexibleSpace, .zoomOut, .actualSize, .fitWidth, .fitHeight, .zoomIn, .zoomToFit]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDocument, .openSideBySide, .syncLock, .goToPage, .pageViewMode, .search, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
+        [.openDocument, .openSideBySide, .syncLock, .goToPage, .pageViewMode, .search, .flexibleSpace, .zoomOut, .actualSize, .fitWidth, .fitHeight, .zoomIn]
     }
 
     func toolbar(
@@ -949,12 +978,24 @@ extension DocumentWindowController: NSToolbarDelegate {
             item.toolTip = "Actual size (⌘0)"
             item.image = NSImage(systemSymbolName: "1.magnifyingglass", accessibilityDescription: "Actual size")
             item.action = #selector(actualSize(_:))
+        case .fitWidth:
+            item.label = "Fit Width"
+            item.paletteLabel = "Fit Width"
+            item.toolTip = "Fit to width (⌘9)"
+            item.image = NSImage(systemSymbolName: "arrow.left.and.right", accessibilityDescription: "Fit to width")
+            item.action = #selector(fitWidth(_:))
+        case .fitHeight:
+            item.label = "Fit Height"
+            item.paletteLabel = "Fit Height"
+            item.toolTip = "Fit to height (⌥⌘9)"
+            item.image = NSImage(systemSymbolName: "arrow.up.and.down", accessibilityDescription: "Fit to height")
+            item.action = #selector(fitHeight(_:))
         case .zoomToFit:
-            item.label = "Zoom to Fit"
-            item.paletteLabel = "Zoom to Fit"
-            item.toolTip = "Zoom to fit window (⌘9)"
-            item.image = NSImage(systemSymbolName: "arrow.up.left.and.down.right.magnifyingglass", accessibilityDescription: "Zoom to fit")
-            item.action = #selector(zoomToFit(_:))
+            item.label = "Fit Width"
+            item.paletteLabel = "Fit Width"
+            item.toolTip = "Fit to width (⌘9)"
+            item.image = NSImage(systemSymbolName: "arrow.left.and.right", accessibilityDescription: "Fit to width")
+            item.action = #selector(fitWidth(_:))
         case .zoomIn:
             item.label = "Zoom In"
             item.paletteLabel = "Zoom In"
@@ -993,7 +1034,7 @@ extension DocumentWindowController: NSWindowDelegate {
     }
 }
 
-private extension NSToolbarItem.Identifier {
+extension NSToolbarItem.Identifier {
     static let openDocument = NSToolbarItem.Identifier("macDVI.toolbar.open")
     static let openSideBySide = NSToolbarItem.Identifier("macDVI.toolbar.openSideBySide")
     static let syncLock = NSToolbarItem.Identifier("macDVI.toolbar.syncLock")
@@ -1002,6 +1043,8 @@ private extension NSToolbarItem.Identifier {
     static let search = NSToolbarItem.Identifier("macDVI.toolbar.search")
     static let zoomOut = NSToolbarItem.Identifier("macDVI.toolbar.zoomOut")
     static let actualSize = NSToolbarItem.Identifier("macDVI.toolbar.actualSize")
+    static let fitWidth = NSToolbarItem.Identifier("macDVI.toolbar.fitWidth")
+    static let fitHeight = NSToolbarItem.Identifier("macDVI.toolbar.fitHeight")
     static let zoomToFit = NSToolbarItem.Identifier("macDVI.toolbar.zoomToFit")
     static let zoomIn = NSToolbarItem.Identifier("macDVI.toolbar.zoomIn")
 }
