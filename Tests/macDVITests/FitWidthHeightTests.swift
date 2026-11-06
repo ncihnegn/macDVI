@@ -160,4 +160,24 @@ final class FitWidthHeightTests: XCTestCase {
         XCTAssertEqual(fitHeightItem.keyEquivalentModifierMask, [.command, .option])
         XCTAssertEqual(fitHeightItem.action, #selector(AppDelegate.fitHeight(_:)))
     }
+
+    func testFitHeightShowsOnlyOnePageInDVI() throws {
+        let sampleURL = URL(fileURLWithPath: "Examples/sample.dvi")
+        let doc = try DVIParser(url: sampleURL).parse()
+        guard doc.pages.count >= 2 else { return }
+
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let dviView = DVIDocumentView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        dviView.document = doc
+        scrollView.documentView = dviView
+
+        dviView.autoScaleMode = .height
+        dviView.applyZoomToFitHeight()
+        dviView.scrollToPage(index: 0)
+
+        let visibleRect = dviView.visibleRect
+        // Page 1 is the 2nd page in the document
+        let page2Rect = dviView.rectForPage(at: 1, page: doc.pages[1])
+        XCTAssertFalse(visibleRect.intersects(page2Rect), "In Fit Height, only the first page should be visible; next page rect \(page2Rect) must not intersect visible rect \(visibleRect)")
+    }
 }

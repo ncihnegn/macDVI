@@ -654,6 +654,7 @@ final class DocumentPane: NSObject {
         }
         if let dv = dviView {
             dv.autoScaleMode = .width
+            dv.applyZoomToFitWidth()
         }
         onScaleChange?(self)
     }
@@ -665,6 +666,8 @@ final class DocumentPane: NSObject {
         }
         if let dv = dviView {
             dv.autoScaleMode = .height
+            dv.applyZoomToFitHeight()
+            dv.scrollToPage(index: dv.currentPageIndex)
         }
         onScaleChange?(self)
     }
@@ -724,11 +727,11 @@ final class DocumentPane: NSObject {
             }
             return
         }
-        // Reserve space for top/bottom margins and potential horizontal scrollbar
-        let availableHeight = max(viewportHeight - 36, 50)
-        let scale = availableHeight / max(pageHeight, 1)
+        // Exactly fit the page height in the viewport and align to top so no stripe of adjacent pages is visible
+        let scale = viewportHeight / max(pageHeight, 1)
         pv.autoScales = false
         pv.scaleFactor = min(max(scale, 0.1), 8.0)
+        positionPDFViewAtTop(pv, page: page)
     }
 
     func pageDown(_ sender: Any?) {

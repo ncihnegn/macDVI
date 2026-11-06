@@ -816,7 +816,7 @@ final class DVIDocumentView: NSView {
         guard !isApplyingZoomToFit else { return }
         guard let document, !document.pages.isEmpty else { return }
         let clipHeight = enclosingScrollView?.contentSize.height ?? enclosingScrollView?.contentView.bounds.height ?? bounds.height
-        let availableHeight = max(clipHeight - pageInset * 2, 100)
+        let availableHeight = max(clipHeight - 1.5 * pageGap, 100)
 
         let targetPage = document.pages[min(currentPageIndex, document.pages.count - 1)]
         let pageHeight: CGFloat
@@ -980,7 +980,7 @@ final class DVIDocumentView: NSView {
         pageRectsCache = rects
     }
 
-    private func rectForPage(at index: Int, page: DVIPage) -> NSRect {
+    func rectForPage(at index: Int, page: DVIPage) -> NSRect {
         if index < pageRectsCache.count {
             return pageRectsCache[index]
         }
@@ -1158,7 +1158,7 @@ final class DVIDocumentView: NSView {
               let clipView = enclosingScrollView?.contentView else { return }
         let targetIndex = isTwoPageView ? (index - (index % 2)) : index
         let newY: CGFloat
-        if targetIndex == 0 {
+        if targetIndex == 0 && autoScaleMode != .height {
             newY = 0
         } else {
             let pageRect = rectForPage(at: targetIndex, page: document.pages[targetIndex])
