@@ -126,6 +126,11 @@ final class DocumentWindowController: NSWindowController {
         pane.onPaneActivated = { [weak self] activatedPane in
             self?.updatePaneFocus(activePane: activatedPane)
         }
+
+        pane.onSyncTeXBackward = { [weak self] result in
+            let fileName = URL(fileURLWithPath: result.file).lastPathComponent
+            self?.statusField.stringValue = "SyncTeX → \(fileName):\(result.line):\(result.column)"
+        }
     }
 
     func updatePaneFocus(activePane: DocumentPane? = nil) {
@@ -664,6 +669,54 @@ final class DocumentWindowController: NSWindowController {
 
     @objc func hideFindBar(_ sender: Any?) {
         focusedPane.hideFindBar()
+    }
+
+    // MARK: - SyncTeX
+
+    @discardableResult
+    func forwardSync(sourceFile: String, line: Int, column: Int? = nil) -> Bool {
+        let pane = focusedPane
+        if pane.forwardSync(sourceFile: sourceFile, line: line, column: column) {
+            let fileName = (sourceFile as NSString).lastPathComponent
+            statusField.stringValue = "SyncTeX ← \(fileName):\(line)"
+            return true
+        }
+        if let sec = secondaryPane, sec !== pane {
+            if sec.forwardSync(sourceFile: sourceFile, line: line, column: column) {
+                let fileName = (sourceFile as NSString).lastPathComponent
+                statusField.stringValue = "SyncTeX ← \(fileName):\(line)"
+                return true
+            }
+        }
+        return false
+    }
+
+    @objc func jumpToTeXSource(_ sender: Any?) {
+        let pane = focusedPane
+        guard let docURL = pane.currentURL else {
+            NSSound.beep()
+            return
+        }
+
+        let currentPage = pane.currentPageNumber
+        guard currentPage > 0 else {
+            NSSound.beep()
+            return
+        }
+
+        let centerPoint = CGPoint(x: 200, y: 150)
+        if let result = pane.backwardSync(page: currentPage, point: centerPoint) {
+            let fileName = URL(fileURLWithPath: result.file).lastPathComponent
+            statusField.stringValue = "SyncTeX → \(fileName):\(result.line)"
+        } else if let parser = SyncTeXService.shared.parser(for: docURL),
+                  let result = parser.backwardSync(page: currentPage, point: CGPoint(x: 100, y: 100)) {
+            SyncTeXEditorOpener.open(file: result.file, line: result.line, column: result.column)
+            let fileName = URL(fileURLWithPath: result.file).lastPathComponent
+            statusField.stringValue = "SyncTeX → \(fileName):\(result.line)"
+        } else {
+            statusField.stringValue = "SyncTeX: No source position found for page \(currentPage)"
+            NSSound.beep()
+        }
     }
 
     override func cancelOperation(_ sender: Any?) {

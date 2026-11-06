@@ -3,9 +3,11 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controllers: [DocumentWindowController] = []
     private var pendingFileURLs: [URL]
+    private var pendingSyncTeXForward: (sourceFile: String, line: Int, column: Int?, docURL: URL?)?
 
-    init(initialFileURLs: [URL]) {
+    init(initialFileURLs: [URL], initialSyncTeXForward: (sourceFile: String, line: Int, column: Int?, docURL: URL?)? = nil) {
         self.pendingFileURLs = initialFileURLs
+        self.pendingSyncTeXForward = initialSyncTeXForward
         super.init()
     }
 
@@ -13,6 +15,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         buildMenu()
+
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleDistributedSyncTeXForward(_:)),
+            name: Notification.Name("com.macDVI.synctexForward"),
+            object: nil
+        )
 
         let urls = pendingFileURLs
         pendingFileURLs.removeAll()
@@ -26,6 +35,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if controllers.isEmpty {
             newWindow(opening: nil)
+        }
+
+        if let pending = pendingSyncTeXForward {
+            pendingSyncTeXForward = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.forwardSync(
+                    docURL: pending.docURL,
+                    sourceFile: pending.sourceFile,
+                    line: pending.line,
+                    column: pending.column
+                )
+            }
         }
     }
 
@@ -189,6 +210,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func useSelectionForFind(_ sender: Any?) {
         keyController?.useSelectionForFind(sender)
+    }
+
+    @objc func jumpToTeXSource(_ sender: Any?) {
+        keyController?.jumpToTeXSource(sender)
+    }
+
+    @objc private func handleDistributedSyncTeXForward(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let file = userInfo["file"] as? String,
+              let lineStr = userInfo["line"] as? String,
+              let line = Int(lineStr) else { return }
+        let col = (userInfo["col"] as? String).flatMap { Int($0) }
+        let docPath = userInfo["doc"] as? String
+        let docURL = docPath.flatMap { URL(fileURLWithPath: $0) }
+
+        NSApp.activate(ignoringOtherApps: true)
+        forwardSync(docURL: docURL, sourceFile: file, line: line, column: col)
+    }
+
+    @discardableResult
+    func forwardSync(docURL: URL?, sourceFile: String, line: Int, column: Int? = nil) -> Bool {
+        if let docURL {
+            let standardDoc = docURL.standardizedFileURL
+            if let controller = controllers.first(where: {
+                $0.currentURL?.standardizedFileURL == standardDoc ||
+                $0.currentURL?.lastPathComponent == docURL.lastPathComponent
+            }) {
+                controller.window?.makeKeyAndOrderFront(nil)
+                return controller.forwardSync(sourceFile: sourceFile, line: line, column: column)
+            } else {
+                let controller = newWindow(opening: docURL)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    controller.forwardSync(sourceFile: sourceFile, line: line, column: column)
+                }
+                return true
+            }
+        } else if let controller = keyController {
+            return controller.forwardSync(sourceFile: sourceFile, line: line, column: column)
+        }
+        return false
     }
 
     private var keyController: DocumentWindowController? {
@@ -374,6 +435,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         goMenu.addItem(.separator())
         goMenu.addItem(goToPageItem)
         goMenu.addItem(goToPageItemJ)
+        goMenu.addItem(.separator())
+        let jumpToSourceItem = NSMenuItem(
+            title: "Jump to TeX Source",
+            action: #selector(jumpToTeXSource(_:)),
+            keyEquivalent: "j"
+        )
+        jumpToSourceItem.keyEquivalentModifierMask = [.command, .shift]
+        jumpToSourceItem.target = self
+        goMenu.addItem(jumpToSourceItem)
         goMenu.addItem(.separator())
         goMenu.addItem(pageDownItem)
         goMenu.addItem(pageUpItem)

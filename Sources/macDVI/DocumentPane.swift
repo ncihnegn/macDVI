@@ -95,6 +95,7 @@ final class DocumentPane: NSObject {
     var onScroll: ((DocumentPane) -> Void)?
     var onPageChange: ((DocumentPane) -> Void)?
     var onScaleChange: ((DocumentPane) -> Void)?
+    var onSyncTeXBackward: ((SyncTeXResult) -> Void)?
 
     override init() {
         super.init()
@@ -321,10 +322,25 @@ final class DocumentPane: NSObject {
 
     private func showPDF(url: URL, originalURL: URL) {
         cleanUpObservers()
-        let pv = PDFView()
+        let pv = MacDVIPDFView()
         self.pdfView = pv
         self.dviView = nil
         self.scrollView = nil
+
+        pv.onCommandClick = { [weak self] pagePoint, page in
+            guard let self, let doc = self.pdfView?.document else { return }
+            let pageIdx = doc.index(for: page)
+            guard pageIdx != NSNotFound else { return }
+            let pageNum = pageIdx + 1
+            let bounds = page.bounds(for: .cropBox)
+            let synctexY = bounds.height - pagePoint.y
+            let synctexPt = CGPoint(x: pagePoint.x, y: synctexY)
+            if let result = self.backwardSync(page: pageNum, point: synctexPt) {
+                let pdfY = bounds.height - result.rect.maxY
+                let pdfRect = CGRect(x: result.rect.minX, y: pdfY, width: result.rect.width, height: result.rect.height)
+                (self.pdfView as? MacDVIPDFView)?.showHighlight(rect: pdfRect, on: page)
+            }
+        }
 
         pv.translatesAutoresizingMaskIntoConstraints = false
         pv.autoScales = autoScales
@@ -415,6 +431,13 @@ final class DocumentPane: NSObject {
         dv.document = document
         dv.isTwoPageView = isTwoPageView
         dv.autoScales = autoScales
+        dv.onCommandClick = { [weak self] pageIndex, pt in
+            guard let self else { return }
+            let pageNum = pageIndex + 1
+            if let result = self.backwardSync(page: pageNum, point: pt) {
+                self.dviView?.showSyncTeXHighlight(pageIndex: pageIndex, rect: result.rect)
+            }
+        }
         sv.documentView = dv
         self.dviView = dv
         self.scrollView = sv
@@ -978,5 +1001,118 @@ final class DocumentPane: NSObject {
         }
         pdfMatches = []
         dviMatches = []
+    }
+
+    // MARK: - SyncTeX Synchronization
+
+    @discardableResult
+    func forwardSync(sourceFile: String, line: Int, column: Int? = nil) -> Bool {
+        guard let currentURL else { return false }
+        guard let result = SyncTeXService.shared.forwardSync(
+            documentURL: currentURL,
+            sourceFile: sourceFile,
+            line: line,
+            column: column
+        ) else {
+            return false
+        }
+
+        let targetPageNum = result.page
+        let current = currentPageNumber
+        if current > 0 && navigationHistory.currentPage != current {
+            navigationHistory.record(pageNumber: current)
+        }
+        navigationHistory.record(pageNumber: targetPageNum)
+
+        let pageIndex = result.page - 1
+        if let dv = dviView {
+            dv.scrollToSyncTeX(pageIndex: pageIndex, rect: result.rect)
+            updateBadge()
+            onPageChange?(self)
+            return true
+        }
+
+        if let pv = pdfView as? MacDVIPDFView,
+           let page = pv.document?.page(at: pageIndex) {
+            let bounds = page.bounds(for: .cropBox)
+            let pdfY = bounds.height - result.rect.maxY
+            let pdfRect = CGRect(x: result.rect.minX, y: pdfY, width: result.rect.width, height: result.rect.height)
+            pv.showHighlight(rect: pdfRect, on: page)
+            updateBadge()
+            onPageChange?(self)
+            return true
+        }
+
+        return false
+    }
+
+    @discardableResult
+    func backwardSync(page: Int, point: CGPoint) -> SyncTeXResult? {
+        guard let currentURL else { return nil }
+        guard let result = SyncTeXService.shared.backwardSync(
+            documentURL: currentURL,
+            page: page,
+            point: point
+        ) else {
+            return nil
+        }
+
+        SyncTeXEditorOpener.open(file: result.file, line: result.line, column: result.column)
+        onSyncTeXBackward?(result)
+        return result
+    }
+}
+
+// MARK: - MacDVIPDFView
+
+final class MacDVIPDFView: PDFView {
+    var onCommandClick: ((CGPoint, PDFPage) -> Void)?
+    private var highlightOverlayView: NSView?
+    private var highlightTimer: Timer?
+
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command) {
+            let windowPoint = event.locationInWindow
+            let viewPoint = convert(windowPoint, from: nil)
+            if let page = page(for: viewPoint, nearest: false) {
+                let pagePoint = convert(viewPoint, to: page)
+                onCommandClick?(pagePoint, page)
+                return
+            }
+        }
+        super.mouseDown(with: event)
+    }
+
+    func showHighlight(rect: CGRect, on page: PDFPage) {
+        highlightTimer?.invalidate()
+        highlightOverlayView?.removeFromSuperview()
+
+        go(to: rect, on: page)
+
+        let targetParent = documentView ?? self
+        let viewRect = convert(rect, from: page)
+        let parentRect = (documentView != nil) ? convert(viewRect, to: targetParent) : viewRect
+
+        let overlay = NSView(frame: parentRect)
+        overlay.wantsLayer = true
+        overlay.layer?.backgroundColor = NSColor.systemBlue.withAlphaComponent(0.35).cgColor
+        overlay.layer?.borderColor = NSColor.systemBlue.withAlphaComponent(0.85).cgColor
+        overlay.layer?.borderWidth = 1.5
+        overlay.layer?.cornerRadius = 3.0
+
+        targetParent.addSubview(overlay)
+        highlightOverlayView = overlay
+
+        highlightTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self, weak overlay] _ in
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.3
+                overlay?.animator().alphaValue = 0.0
+            } completionHandler: {
+                overlay?.removeFromSuperview()
+                if self?.highlightOverlayView === overlay {
+                    self?.highlightOverlayView = nil
+                }
+            }
+        }
     }
 }

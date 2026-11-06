@@ -214,11 +214,132 @@ if let searchTestIndex = arguments.firstIndex(of: "--test-search") {
     }
 }
 
-let fileURLs = arguments
+// MARK: - SyncTeX CLI Support
+
+func parseSyncTeXLocation(_ loc: String) -> (file: String, line: Int, column: Int?)? {
+    let parts = loc.split(separator: ":").map(String.init)
+    if parts.count >= 2 {
+        if let line = Int(parts[0]) {
+            if parts.count >= 3, let col = Int(parts[1]) {
+                let file = parts.dropFirst(2).joined(separator: ":")
+                return (file, line, col)
+            } else {
+                let file = parts.dropFirst(1).joined(separator: ":")
+                return (file, line, nil)
+            }
+        }
+        if let line = Int(parts[1]) {
+            let col = parts.count >= 3 ? Int(parts[2]) : nil
+            return (parts[0], line, col)
+        }
+    }
+    return nil
+}
+
+if let testForwardIndex = arguments.firstIndex(of: "--test-synctex-forward") {
+    var testArgs = arguments
+    testArgs.remove(at: testForwardIndex)
+    guard testArgs.count >= 2,
+          let parsed = parseSyncTeXLocation(testArgs[0]) else {
+        FileHandle.standardError.write(Data("usage: macDVI --test-synctex-forward <file:line[:col]> <doc>\n".utf8))
+        exit(64)
+    }
+    let docURL = URL(fileURLWithPath: testArgs[1])
+    guard let result = SyncTeXService.shared.forwardSync(
+        documentURL: docURL,
+        sourceFile: parsed.file,
+        line: parsed.line,
+        column: parsed.column
+    ) else {
+        FileHandle.standardError.write(Data("No SyncTeX match found for \(parsed.file):\(parsed.line)\n".utf8))
+        exit(1)
+    }
+    print("SyncTeX forward result:")
+    print("  File: \(result.file)")
+    print("  Line: \(result.line)")
+    print("  Page: \(result.page)")
+    print("  Rect: \(result.rect)")
+    print("  Point: \(result.point)")
+    exit(0)
+}
+
+if let testBackwardIndex = arguments.firstIndex(of: "--test-synctex-backward") {
+    var testArgs = arguments
+    testArgs.remove(at: testBackwardIndex)
+    guard testArgs.count >= 2 else {
+        FileHandle.standardError.write(Data("usage: macDVI --test-synctex-backward <page>:<x>:<y> <doc>\n".utf8))
+        exit(64)
+    }
+    let locParts = testArgs[0].split(separator: ":").compactMap { Double($0) }
+    guard locParts.count >= 3 else {
+        FileHandle.standardError.write(Data("Invalid coordinate format. Use <page>:<x>:<y>\n".utf8))
+        exit(64)
+    }
+    let page = Int(locParts[0])
+    let pt = CGPoint(x: locParts[1], y: locParts[2])
+    let docURL = URL(fileURLWithPath: testArgs[1])
+    guard let result = SyncTeXService.shared.backwardSync(
+        documentURL: docURL,
+        page: page,
+        point: pt
+    ) else {
+        FileHandle.standardError.write(Data("No SyncTeX record found for page \(page) at \(pt)\n".utf8))
+        exit(1)
+    }
+    print("SyncTeX backward result:")
+    print("  File: \(result.file)")
+    print("  Line: \(result.line)")
+    print("  Column: \(result.column)")
+    print("  Page: \(result.page)")
+    print("  Rect: \(result.rect)")
+    exit(0)
+}
+
+var initialSyncTeXForward: (sourceFile: String, line: Int, column: Int?, docURL: URL?)? = nil
+if let synctexIndex = arguments.firstIndex(of: "--synctex-forward") {
+    var remaining = arguments
+    remaining.remove(at: synctexIndex)
+    if !remaining.isEmpty, let parsed = parseSyncTeXLocation(remaining[0]) {
+        let docPath = remaining.count > 1 ? remaining[1] : nil
+        let docURL = docPath.flatMap { URL(fileURLWithPath: $0) }
+        initialSyncTeXForward = (parsed.file, parsed.line, parsed.column, docURL)
+
+        let myPid = ProcessInfo.processInfo.processIdentifier
+        let runningInstance = NSWorkspace.shared.runningApplications.first { app in
+            (app.bundleIdentifier == "com.macDVI" || app.localizedName == "macDVI") &&
+            app.processIdentifier != myPid
+        }
+
+        if let running = runningInstance {
+            var userInfo: [String: String] = [
+                "file": parsed.file,
+                "line": "\(parsed.line)"
+            ]
+            if let col = parsed.column { userInfo["col"] = "\(col)" }
+            if let docURL { userInfo["doc"] = docURL.path }
+
+            DistributedNotificationCenter.default().postNotificationName(
+                Notification.Name("com.macDVI.synctexForward"),
+                object: nil,
+                userInfo: userInfo,
+                deliverImmediately: true
+            )
+            running.activate(options: [.activateIgnoringOtherApps])
+            usleep(50_000) // 50ms to allow notification dispatch
+            exit(0)
+        }
+    }
+}
+
+var fileURLs = arguments
     .filter { !$0.hasPrefix("-") }
     .map { URL(fileURLWithPath: $0) }
 
+if let fwdDocURL = initialSyncTeXForward?.docURL, !fileURLs.contains(fwdDocURL) {
+    fileURLs.insert(fwdDocURL, at: 0)
+}
+
 let app = NSApplication.shared
-let delegate = AppDelegate(initialFileURLs: fileURLs)
+let delegate = AppDelegate(initialFileURLs: fileURLs, initialSyncTeXForward: initialSyncTeXForward)
 app.delegate = delegate
 app.run()

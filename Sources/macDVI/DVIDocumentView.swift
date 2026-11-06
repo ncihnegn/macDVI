@@ -61,6 +61,15 @@ final class DVIDocumentView: NSView {
         }
     }
 
+    var synctexHighlightRect: CGRect? {
+        didSet { needsDisplay = true }
+    }
+    var synctexHighlightPageIndex: Int? {
+        didSet { needsDisplay = true }
+    }
+    private var synctexHighlightTimer: Timer?
+    var onCommandClick: ((Int, CGPoint) -> Void)?
+
     override var isFlipped: Bool {
         true
     }
@@ -111,6 +120,7 @@ final class DVIDocumentView: NSView {
             let img = pageImage(at: index, page: page, in: pageRect, document: document)
             img.draw(in: pageRect)
             drawSearchHighlights(for: index, in: pageRect)
+            drawSyncTeXHighlight(for: index, in: pageRect)
         }
     }
 
@@ -201,6 +211,68 @@ final class DVIDocumentView: NSView {
         clipView.scroll(to: NSPoint(x: newX, y: newY))
         enclosingScrollView?.reflectScrolledClipView(clipView)
         needsDisplay = true
+    }
+
+    private func drawSyncTeXHighlight(for pageIndex: Int, in pageRect: NSRect) {
+        guard let hRect = synctexHighlightRect, synctexHighlightPageIndex == pageIndex else { return }
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+
+        let drawRect = CGRect(
+            x: pageRect.minX + CGFloat(hRect.minX) * zoom,
+            y: pageRect.minY + CGFloat(hRect.minY) * zoom,
+            width: CGFloat(hRect.width) * zoom,
+            height: CGFloat(hRect.height) * zoom
+        )
+        let path = CGPath(roundedRect: drawRect, cornerWidth: 3, cornerHeight: 3, transform: nil)
+        context.saveGState()
+        context.addPath(path)
+        context.setFillColor(NSColor.systemBlue.withAlphaComponent(0.35).cgColor)
+        context.fillPath()
+
+        context.addPath(path)
+        context.setStrokeColor(NSColor.systemBlue.withAlphaComponent(0.85).cgColor)
+        context.setLineWidth(1.5)
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    func showSyncTeXHighlight(pageIndex: Int, rect: CGRect) {
+        synctexHighlightPageIndex = pageIndex
+        synctexHighlightRect = rect
+        synctexHighlightTimer?.invalidate()
+        synctexHighlightTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+            self?.synctexHighlightRect = nil
+            self?.synctexHighlightPageIndex = nil
+        }
+        needsDisplay = true
+    }
+
+    func scrollToSyncTeX(pageIndex: Int, rect: CGRect) {
+        guard let document, pageIndex >= 0, pageIndex < document.pages.count,
+              let clipView = enclosingScrollView?.contentView else { return }
+        ensurePageRectsCached()
+        let pageRect = rectForPage(at: pageIndex, page: document.pages[pageIndex])
+
+        let targetX = pageRect.minX + CGFloat(rect.minX) * zoom
+        let targetY = pageRect.minY + CGFloat(rect.minY) * zoom
+        let targetW = CGFloat(rect.width) * zoom
+        let targetH = CGFloat(rect.height) * zoom
+
+        let viewport = clipView.bounds
+        let centerX = targetX + targetW / 2
+        let centerY = targetY + targetH / 2
+
+        var newX = centerX - viewport.width / 2
+        var newY = centerY - viewport.height / 2
+
+        let maxX = max(bounds.width - viewport.width, 0)
+        let maxY = max(bounds.height - viewport.height, 0)
+        newX = max(min(newX, maxX), 0)
+        newY = max(min(newY, maxY), 0)
+
+        clipView.scroll(to: NSPoint(x: newX, y: newY))
+        enclosingScrollView?.reflectScrolledClipView(clipView)
+        showSyncTeXHighlight(pageIndex: pageIndex, rect: rect)
     }
 
     private func drawPageBackground(in pageRect: NSRect) {
@@ -873,6 +945,21 @@ final class DVIDocumentView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        if event.modifierFlags.contains(.command) {
+            let clickPoint = convert(event.locationInWindow, from: nil)
+            ensurePageRectsCached()
+            if let document {
+                for (index, page) in document.pages.enumerated() {
+                    let pageRect = rectForPage(at: index, page: page)
+                    if pageRect.contains(clickPoint) {
+                        let pageX = (clickPoint.x - pageRect.minX) / zoom
+                        let pageY = (clickPoint.y - pageRect.minY) / zoom
+                        onCommandClick?(index, CGPoint(x: pageX, y: pageY))
+                        return
+                    }
+                }
+            }
+        }
         super.mouseDown(with: event)
     }
 
