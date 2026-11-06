@@ -45,6 +45,11 @@ final class DocumentPane: NSObject {
             pdfView?.displayMode = isTwoPageView ? .twoUpContinuous : .singlePageContinuous
             pdfView?.displaysAsBook = false
             dviView?.isTwoPageView = isTwoPageView
+            if autoScaleMode == .width {
+                fitWidth()
+            } else if autoScaleMode == .height {
+                fitHeight()
+            }
             updateBadge()
         }
     }
@@ -250,12 +255,14 @@ final class DocumentPane: NSObject {
     }
 
     @objc private func contentContainerFrameDidChange() {
-        guard let pv = pdfView, autoScaleMode != .none else { return }
+        guard autoScaleMode != .none else { return }
         switch autoScaleMode {
         case .width:
-            applyPDFZoomToFitWidth(pv)
+            if let pv = pdfView { applyPDFZoomToFitWidth(pv) }
+            if let dv = dviView { dv.applyZoomToFitWidth() }
         case .height:
-            applyPDFZoomToFitHeight(pv)
+            if let pv = pdfView { applyPDFZoomToFitHeight(pv) }
+            if let dv = dviView { dv.applyZoomToFitHeight() }
         case .none:
             break
         }
@@ -475,7 +482,6 @@ final class DocumentPane: NSObject {
         let dv = DVIDocumentView(frame: NSRect(x: 0, y: 0, width: 900, height: 700))
         dv.document = document
         dv.isTwoPageView = isTwoPageView
-        dv.autoScaleMode = autoScaleMode
         dv.onCommandClick = { [weak self] pageIndex, pt in
             guard let self else { return }
             let pageNum = pageIndex + 1
@@ -489,6 +495,7 @@ final class DocumentPane: NSObject {
 
         replaceContent(with: sv)
         pinToContainer(sv)
+        dv.autoScaleMode = autoScaleMode
 
         let targetIndex: Int
         if let saved = DocumentHistoryStore.lastViewedPage(for: document.url),
@@ -676,7 +683,8 @@ final class DocumentPane: NSObject {
     }
 
     private func applyPDFZoomToFitWidth(_ pv: PDFView) {
-        guard let page = pv.currentPage ?? pv.document?.page(at: 0) else { return }
+        guard let doc = pv.document, doc.pageCount > 0 else { return }
+        guard let page = pv.currentPage ?? doc.page(at: 0) else { return }
         let pageBounds = page.bounds(for: pv.displayBox)
         var pageWidth = pageBounds.width
         if page.rotation == 90 || page.rotation == 270 {
@@ -685,36 +693,39 @@ final class DocumentPane: NSObject {
         if isTwoPageView {
             pageWidth = pageWidth * 2 + 16
         }
-        let clipWidth = (pv.subviews.first(where: { $0 is NSScrollView }) as? NSScrollView)?.contentView.bounds.width ?? pv.bounds.width
-        guard clipWidth > 50 else {
+        let viewportWidth = contentContainer.bounds.width
+        guard viewportWidth > 50 else {
             DispatchQueue.main.async { [weak self, weak pv] in
                 guard let self, let pv, self.autoScaleMode == .width else { return }
                 self.applyPDFZoomToFitWidth(pv)
             }
             return
         }
-        let availableWidth = max(clipWidth - 24, 100)
+        // Reserve space for margins and potential vertical scrollbar
+        let availableWidth = max(viewportWidth - 32, 50)
         let scale = availableWidth / max(pageWidth, 1)
         pv.autoScales = false
         pv.scaleFactor = min(max(scale, 0.1), 8.0)
     }
 
     private func applyPDFZoomToFitHeight(_ pv: PDFView) {
-        guard let page = pv.currentPage ?? pv.document?.page(at: 0) else { return }
+        guard let doc = pv.document, doc.pageCount > 0 else { return }
+        guard let page = pv.currentPage ?? doc.page(at: 0) else { return }
         let pageBounds = page.bounds(for: pv.displayBox)
         var pageHeight = pageBounds.height
         if page.rotation == 90 || page.rotation == 270 {
             pageHeight = pageBounds.width
         }
-        let clipHeight = (pv.subviews.first(where: { $0 is NSScrollView }) as? NSScrollView)?.contentView.bounds.height ?? pv.bounds.height
-        guard clipHeight > 50 else {
+        let viewportHeight = contentContainer.bounds.height
+        guard viewportHeight > 50 else {
             DispatchQueue.main.async { [weak self, weak pv] in
                 guard let self, let pv, self.autoScaleMode == .height else { return }
                 self.applyPDFZoomToFitHeight(pv)
             }
             return
         }
-        let availableHeight = max(clipHeight - 24, 100)
+        // Reserve space for top/bottom margins and potential horizontal scrollbar
+        let availableHeight = max(viewportHeight - 36, 50)
         let scale = availableHeight / max(pageHeight, 1)
         pv.autoScales = false
         pv.scaleFactor = min(max(scale, 0.1), 8.0)

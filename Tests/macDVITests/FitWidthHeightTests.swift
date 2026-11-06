@@ -13,20 +13,29 @@ final class FitWidthHeightTests: XCTestCase {
         scrollView.documentView = dviView
 
         dviView.autoScaleMode = .width
-        let zoomWidth = dviView.zoom
-        XCTAssertGreaterThan(zoomWidth, 0.1)
+        let zoom1 = dviView.zoom
+        XCTAssertGreaterThan(zoom1, 1.0)
+
+        // Multiple calls should not zoom out; scale must remain stable
+        dviView.applyZoomToFitWidth()
+        XCTAssertEqual(dviView.zoom, zoom1, accuracy: 0.001)
 
         dviView.autoScaleMode = .height
         let zoomHeight = dviView.zoom
         XCTAssertGreaterThan(zoomHeight, 0.1)
+        XCTAssertNotEqual(zoom1, zoomHeight, accuracy: 0.001)
 
-        // For a non-square 800x600 viewport and standard page, width scale and height scale differ
-        XCTAssertNotEqual(zoomWidth, zoomHeight, accuracy: 0.001)
+        dviView.applyZoomToFitHeight()
+        XCTAssertEqual(dviView.zoom, zoomHeight, accuracy: 0.001)
     }
 
     func testDocumentPaneFitWidthAndHeight() {
-        let sampleURL = URL(fileURLWithPath: "Examples/sample.dvi")
+        let sampleURL = URL(fileURLWithPath: "Examples/sample.pdf")
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         let pane = DocumentPane()
+        window.contentView = pane.containerView
+        window.layoutIfNeeded()
+
         let exp = expectation(description: "load document")
         pane.load(url: sampleURL) { _ in
             exp.fulfill()
@@ -34,12 +43,57 @@ final class FitWidthHeightTests: XCTestCase {
         wait(for: [exp], timeout: 5.0)
 
         pane.fitWidth()
-        XCTAssertEqual(pane.autoScaleMode, .width)
-        XCTAssertTrue(pane.autoScales)
+        let widthScale1 = pane.zoomFactor
+        XCTAssertGreaterThan(widthScale1, 1.1)
+
+        // Fit width should NOT work like zoom out on repeated invocations
+        pane.fitWidth()
+        let widthScale2 = pane.zoomFactor
+        XCTAssertEqual(widthScale1, widthScale2, accuracy: 0.001)
 
         pane.fitHeight()
-        XCTAssertEqual(pane.autoScaleMode, .height)
-        XCTAssertTrue(pane.autoScales)
+        let heightScale1 = pane.zoomFactor
+        XCTAssertGreaterThan(heightScale1, 0.5)
+        XCTAssertLessThan(heightScale1, widthScale1)
+
+        // Fit height should also remain stable on repeated invocations
+        pane.fitHeight()
+        let heightScale2 = pane.zoomFactor
+        XCTAssertEqual(heightScale1, heightScale2, accuracy: 0.001)
+
+        pane.actualSize()
+        XCTAssertEqual(pane.autoScaleMode, .none)
+        XCTAssertFalse(pane.autoScales)
+        XCTAssertEqual(pane.zoomFactor, 1.0, accuracy: 0.001)
+    }
+
+    func testDocumentPaneDVIWithWindow() {
+        let sampleURL = URL(fileURLWithPath: "Examples/sample.dvi")
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let pane = DocumentPane()
+        window.contentView = pane.containerView
+        window.layoutIfNeeded()
+
+        let exp = expectation(description: "load DVI document")
+        pane.load(url: sampleURL) { _ in
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 5.0)
+
+        pane.fitWidth()
+        let dviWidth1 = pane.zoomFactor
+        XCTAssertGreaterThan(dviWidth1, 1.0)
+
+        pane.fitWidth()
+        XCTAssertEqual(pane.zoomFactor, dviWidth1, accuracy: 0.001)
+
+        pane.fitHeight()
+        let dviHeight1 = pane.zoomFactor
+        XCTAssertGreaterThan(dviHeight1, 0.5)
+        XCTAssertNotEqual(dviWidth1, dviHeight1, accuracy: 0.001)
+
+        pane.fitHeight()
+        XCTAssertEqual(pane.zoomFactor, dviHeight1, accuracy: 0.001)
 
         pane.actualSize()
         XCTAssertEqual(pane.autoScaleMode, .none)

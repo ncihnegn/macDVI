@@ -781,7 +781,7 @@ final class DVIDocumentView: NSView {
     func applyZoomToFitWidth() {
         guard !isApplyingZoomToFit else { return }
         guard let document, !document.pages.isEmpty else { return }
-        let clipWidth = enclosingScrollView?.contentView.bounds.width ?? bounds.width
+        let clipWidth = enclosingScrollView?.contentSize.width ?? enclosingScrollView?.contentView.bounds.width ?? bounds.width
         let availableWidth = max(clipWidth - pageInset * 2, 100)
 
         let targetPage = document.pages[min(currentPageIndex, document.pages.count - 1)]
@@ -815,7 +815,7 @@ final class DVIDocumentView: NSView {
     func applyZoomToFitHeight() {
         guard !isApplyingZoomToFit else { return }
         guard let document, !document.pages.isEmpty else { return }
-        let clipHeight = enclosingScrollView?.contentView.bounds.height ?? bounds.height
+        let clipHeight = enclosingScrollView?.contentSize.height ?? enclosingScrollView?.contentView.bounds.height ?? bounds.height
         let availableHeight = max(clipHeight - pageInset * 2, 100)
 
         let targetPage = document.pages[min(currentPageIndex, document.pages.count - 1)]
@@ -847,7 +847,7 @@ final class DVIDocumentView: NSView {
     }
 
     private func updateFrameSize() {
-        let clipWidth = enclosingScrollView?.contentView.bounds.width ?? 900
+        let clipWidth = enclosingScrollView?.contentSize.width ?? enclosingScrollView?.contentView.bounds.width ?? 900
         guard let document, !document.pages.isEmpty else {
             setFrameSize(CGSize(width: max(clipWidth, 900), height: 600))
             return
