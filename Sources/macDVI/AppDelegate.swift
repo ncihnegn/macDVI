@@ -319,6 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appItem)
 
         let fileItem = NSMenuItem()
+        fileItem.title = "File"
         let fileMenu = NSMenu(title: "File")
         let newWindowItem = NSMenuItem(title: "New Window", action: #selector(newWindow(_:)), keyEquivalent: "n")
         newWindowItem.target = self
@@ -351,6 +352,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(fileItem)
 
         let editItem = NSMenuItem()
+        editItem.title = "Edit"
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
         editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
@@ -385,6 +387,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(editItem)
 
         let viewItem = NSMenuItem()
+        viewItem.title = "View"
         let viewMenu = NSMenu(title: "View")
         let zoomInItem = NSMenuItem(title: "Zoom In", action: #selector(zoomIn(_:)), keyEquivalent: "+")
         zoomInItem.target = self
@@ -422,6 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(viewItem)
 
         let goItem = NSMenuItem()
+        goItem.title = "Go"
         let goMenu = NSMenu(title: "Go")
 
         let nextItem = NSMenuItem(title: "Next Page", action: #selector(nextPage(_:)), keyEquivalent: "]")
@@ -461,16 +465,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         goToPageItem.keyEquivalentModifierMask = [.command, .option]
         goToPageItem.target = self
 
-        let goToPageItemJ = NSMenuItem(title: "Go to Page…", action: #selector(goToPage(_:)), keyEquivalent: "j")
-        goToPageItemJ.keyEquivalentModifierMask = [.command]
-        goToPageItemJ.target = self
-        goToPageItemJ.isAlternate = true
-
         goMenu.addItem(nextItem)
         goMenu.addItem(prevItem)
         goMenu.addItem(.separator())
         goMenu.addItem(goToPageItem)
-        goMenu.addItem(goToPageItemJ)
         goMenu.addItem(.separator())
         let jumpToSourceItem = NSMenuItem(
             title: "Jump to TeX Source",
@@ -762,18 +760,36 @@ extension AppDelegate: NSWindowDelegate {
 }
 
 private final class MainMenu: NSMenu {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if super.performKeyEquivalent(with: event) {
+            return true
+        }
+        // Support Command-J as alternate shortcut for Go to Page without duplicating menu item
+        if event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
+           event.charactersIgnoringModifiers == "j" {
+            NSApp.sendAction(#selector(AppDelegate.goToPage(_:)), to: nil, from: self)
+            return true
+        }
+        return false
+    }
+
     override func item(withTitle title: String) -> NSMenuItem? {
         if let item = super.item(withTitle: title) {
             return item
         }
+        for item in items {
+            if item.title == title || item.submenu?.title == title {
+                return item
+            }
+        }
         if title == "Windows" {
-            return super.item(withTitle: "Window")
+            return super.item(withTitle: "Window") ?? items.first { $0.title == "Window" || $0.submenu?.title == "Window" }
         }
         if title == "Window" {
-            return super.item(withTitle: "Windows")
+            return super.item(withTitle: "Windows") ?? items.first { $0.title == "Windows" || $0.submenu?.title == "Windows" }
         }
         if title == "Preferences" || title == "Preference" {
-            return super.item(withTitle: "Settings")
+            return super.item(withTitle: "Settings") ?? items.first { $0.title == "Settings" || $0.submenu?.title == "Settings" }
         }
         return nil
     }

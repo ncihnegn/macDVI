@@ -45,4 +45,28 @@ final class WindowMenuTests: XCTestCase {
         }
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
     }
+
+    func testGoMenuHasSingleGoToPageItem() throws {
+        let app = NSApplication.shared
+        let delegate = AppDelegate(initialFileURLs: [])
+        app.delegate = delegate
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+        let goMenuItem = app.mainMenu?.item(withTitle: "Go")
+        XCTAssertNotNil(goMenuItem)
+        guard let goMenu = goMenuItem?.submenu else {
+            XCTFail("Go menu item should have submenu")
+            return
+        }
+
+        let goToPageItems = goMenu.items.filter { $0.title.hasPrefix("Go to Page") }
+        XCTAssertEqual(goToPageItems.count, 1, "There should be exactly one 'Go to Page' menu item")
+        XCTAssertEqual(goToPageItems.first?.keyEquivalent, "g")
+        XCTAssertEqual(goToPageItems.first?.keyEquivalentModifierMask, [.command, .option])
+
+        for window in app.windows {
+            window.close()
+        }
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+    }
 }
