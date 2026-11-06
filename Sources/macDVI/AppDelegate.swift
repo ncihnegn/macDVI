@@ -163,6 +163,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyController?.goToPage(sender)
     }
 
+    @objc func performFind(_ sender: Any?) {
+        keyController?.performFind(sender)
+    }
+
+    @objc func findNext(_ sender: Any?) {
+        keyController?.findNext(sender)
+    }
+
+    @objc func findPrevious(_ sender: Any?) {
+        keyController?.findPrevious(sender)
+    }
+
+    @objc func useSelectionForFind(_ sender: Any?) {
+        keyController?.useSelectionForFind(sender)
+    }
+
     private var keyController: DocumentWindowController? {
         guard let keyWindow = NSApp.keyWindow else {
             return controllers.last
@@ -227,6 +243,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
         editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+
+        editMenu.addItem(.separator())
+        let findItem = NSMenuItem(title: "Find", action: nil, keyEquivalent: "")
+        let findSubmenu = NSMenu(title: "Find")
+
+        let findMenuItem = NSMenuItem(title: "Find…", action: #selector(performFind(_:)), keyEquivalent: "f")
+        findMenuItem.target = self
+        findSubmenu.addItem(findMenuItem)
+
+        let findNextMenuItem = NSMenuItem(title: "Find Next", action: #selector(findNext(_:)), keyEquivalent: "g")
+        findNextMenuItem.target = self
+        findSubmenu.addItem(findNextMenuItem)
+
+        let findPrevMenuItem = NSMenuItem(title: "Find Previous", action: #selector(findPrevious(_:)), keyEquivalent: "g")
+        findPrevMenuItem.keyEquivalentModifierMask = [.command, .shift]
+        findPrevMenuItem.target = self
+        findSubmenu.addItem(findPrevMenuItem)
+
+        let useSelectionMenuItem = NSMenuItem(title: "Use Selection for Find", action: #selector(useSelectionForFind(_:)), keyEquivalent: "e")
+        useSelectionMenuItem.target = self
+        findSubmenu.addItem(useSelectionMenuItem)
+
+        findItem.submenu = findSubmenu
+        editMenu.addItem(findItem)
+
         editItem.submenu = editMenu
         mainMenu.addItem(editItem)
 

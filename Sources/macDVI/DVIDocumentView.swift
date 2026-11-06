@@ -6,6 +6,8 @@ final class DVIDocumentView: NSView {
             fontCache.removeAll()
             pageRenderCache.removeAllObjects()
             pageRectsCache.removeAll()
+            searchMatches.removeAll()
+            activeSearchMatchIndex = -1
             if let document {
                 type1FontProvider = Type1FontProvider(documentURL: document.url)
                 pkFontProvider = PKFontProvider(documentURL: document.url)
@@ -44,6 +46,18 @@ final class DVIDocumentView: NSView {
         didSet {
             guard autoScales else { return }
             applyZoomToFit()
+        }
+    }
+
+    var searchMatches: [DVISearchMatch] = [] {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    var activeSearchMatchIndex: Int = -1 {
+        didSet {
+            needsDisplay = true
         }
     }
 
@@ -96,6 +110,7 @@ final class DVIDocumentView: NSView {
             drawPageBackground(in: pageRect)
             let img = pageImage(at: index, page: page, in: pageRect, document: document)
             img.draw(in: pageRect)
+            drawSearchHighlights(for: index, in: pageRect)
         }
     }
 
@@ -115,6 +130,77 @@ final class DVIDocumentView: NSView {
 
         pageRenderCache.setObject(image, forKey: cacheKey)
         return image
+    }
+
+    private func drawSearchHighlights(for pageIndex: Int, in pageRect: NSRect) {
+        guard !searchMatches.isEmpty else { return }
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+
+        for (matchIdx, match) in searchMatches.enumerated() {
+            guard match.pageIndex == pageIndex else { continue }
+            let isActive = (matchIdx == activeSearchMatchIndex)
+
+            for rect in match.rects {
+                let drawRect = CGRect(
+                    x: pageRect.minX + CGFloat(rect.minX) * zoom,
+                    y: pageRect.minY + CGFloat(rect.minY) * zoom,
+                    width: CGFloat(rect.width) * zoom,
+                    height: CGFloat(rect.height) * zoom
+                )
+
+                let path = CGPath(roundedRect: drawRect, cornerWidth: 2.5, cornerHeight: 2.5, transform: nil)
+                context.saveGState()
+                context.addPath(path)
+
+                if isActive {
+                    context.setFillColor(NSColor.systemOrange.withAlphaComponent(0.60).cgColor)
+                    context.fillPath()
+
+                    context.addPath(path)
+                    context.setStrokeColor(NSColor.systemOrange.cgColor)
+                    context.setLineWidth(1.5)
+                    context.strokePath()
+                } else {
+                    context.setFillColor(NSColor.systemYellow.withAlphaComponent(0.40).cgColor)
+                    context.fillPath()
+                }
+                context.restoreGState()
+            }
+        }
+    }
+
+    func scrollToSearchMatch(_ match: DVISearchMatch) {
+        guard let document, match.pageIndex >= 0, match.pageIndex < document.pages.count,
+              let clipView = enclosingScrollView?.contentView else { return }
+        ensurePageRectsCached()
+        let pageRect = rectForPage(at: match.pageIndex, page: document.pages[match.pageIndex])
+
+        guard let firstRect = match.rects.first else {
+            scrollToPage(index: match.pageIndex)
+            return
+        }
+
+        let unionRect = match.rects.reduce(firstRect) { $0.union($1) }
+        let targetX = pageRect.minX + CGFloat(unionRect.minX) * zoom
+        let targetY = pageRect.minY + CGFloat(unionRect.minY) * zoom
+        let targetW = CGFloat(unionRect.width) * zoom
+        let targetH = CGFloat(unionRect.height) * zoom
+
+        let viewport = clipView.bounds
+        let centerX = targetX + targetW / 2
+        let centerY = targetY + targetH / 2
+
+        var newX = centerX - viewport.width / 2
+        var newY = centerY - viewport.height / 2
+
+        let maxX = max(bounds.width - viewport.width, 0)
+        let maxY = max(bounds.height - viewport.height, 0)
+        newX = max(min(newX, maxX), 0)
+        newY = max(min(newY, maxY), 0)
+
+        clipView.scroll(to: NSPoint(x: newX, y: newY))
+        enclosingScrollView?.reflectScrolledClipView(clipView)
+        needsDisplay = true
     }
 
     private func drawPageBackground(in pageRect: NSRect) {

@@ -33,6 +33,10 @@ let package = Package(
                     postscriptStaticLibrary.path
                 ])
             ]
+        ),
+        .testTarget(
+            name: "macDVITests",
+            dependencies: ["macDVI"]
         )
     ]
 )

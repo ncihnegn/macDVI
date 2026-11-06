@@ -67,13 +67,7 @@ if let inspectIndex = arguments.firstIndex(of: "--inspect") {
                 }
             }
         }
-        if let p1 = document.pages.first {
-            for item in p1.items {
-                if case .glyph(let g) = item, g.characterCode == 79 { // 'O'
-                    print("Glyph 'O' at x=\(g.x), baselineY=\(g.baselineY)")
-                }
-            }
-        }
+
         if !graphics.isEmpty {
             print("Graphics (\(graphics.count)):\n  " + graphics.joined(separator: "\n  "))
         }
@@ -172,6 +166,51 @@ if let loadTestIndex = arguments.firstIndex(of: "--load-test") {
     } catch {
         FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
         exit(1)
+    }
+}
+
+if let searchTestIndex = arguments.firstIndex(of: "--test-search") {
+    var searchArgs = arguments
+    searchArgs.remove(at: searchTestIndex)
+    guard searchArgs.count >= 2 else {
+        FileHandle.standardError.write(Data("usage: macDVI --test-search <file> <query> [--case-sensitive]\n".utf8))
+        exit(64)
+    }
+    let filePath = searchArgs[0]
+    let query = searchArgs[1]
+    let caseSensitive = searchArgs.contains("--case-sensitive")
+
+    let url = URL(fileURLWithPath: filePath)
+    if DVIDocumentLoader.isPDF(url: url) {
+        guard let pdfDoc = PDFDocument(url: url) else {
+            print("Failed to load PDF: \(url.path)")
+            exit(1)
+        }
+        var options: NSString.CompareOptions = [.literal]
+        if !caseSensitive {
+            options.insert(.caseInsensitive)
+        }
+        let matches = pdfDoc.findString(query, withOptions: options)
+        print("PDF search for '\(query)' found \(matches.count) match(es):")
+        for (i, m) in matches.enumerated() {
+            let pageNum = m.pages.first.flatMap { pdfDoc.index(for: $0) + 1 } ?? 0
+            print("  [\(i + 1)] Page \(pageNum): '\(m.string ?? "")'")
+        }
+        exit(0)
+    } else {
+        do {
+            let doc = try DVIParser(url: url).parse()
+            let engine = DVISearchEngine()
+            let matches = engine.search(document: doc, query: query, caseSensitive: caseSensitive)
+            print("DVI search for '\(query)' found \(matches.count) match(es):")
+            for (i, m) in matches.enumerated() {
+                print("  [\(i + 1)] Page \(m.pageIndex + 1): '\(m.text)' with \(m.rects.count) rect(s): \(m.rects)")
+            }
+            exit(0)
+        } catch {
+            print("DVI search error: \(error.localizedDescription)")
+            exit(1)
+        }
     }
 }
 

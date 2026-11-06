@@ -22,6 +22,20 @@ final class DocumentPane: NSObject {
     private var isRestoringPage = false
     private var headerHeightConstraint: NSLayoutConstraint?
 
+    let findBar = FindBarView()
+    private var findBarHeightConstraint: NSLayoutConstraint?
+    private let dviSearchEngine = DVISearchEngine()
+
+    private(set) var searchQuery: String = ""
+    private(set) var isCaseSensitive: Bool = false
+    private var dviMatches: [DVISearchMatch] = []
+    private var pdfMatches: [PDFSelection] = []
+    private(set) var currentMatchIndex: Int = -1
+
+    var isFindBarVisible: Bool {
+        !findBar.isHidden
+    }
+
     var isTwoPageView: Bool = false {
         didSet {
             pdfView?.displayMode = isTwoPageView ? .twoUpContinuous : .singlePageContinuous
@@ -142,10 +156,33 @@ final class DocumentPane: NSObject {
         headerBar.addSubview(bottomBorder)
 
         containerView.addSubview(headerBar)
+        containerView.addSubview(findBar)
         containerView.addSubview(contentContainer)
 
         let headerHeight = headerBar.heightAnchor.constraint(equalToConstant: 0)
         headerHeightConstraint = headerHeight
+
+        let findBarHeight = findBar.heightAnchor.constraint(equalToConstant: 0)
+        findBarHeightConstraint = findBarHeight
+        findBar.isHidden = true
+
+        findBar.onSearchTextChanged = { [weak self] text in
+            guard let self else { return }
+            self.performSearch(query: text, caseSensitive: self.findBar.isCaseSensitive)
+        }
+        findBar.onNextMatch = { [weak self] in
+            self?.findNext()
+        }
+        findBar.onPreviousMatch = { [weak self] in
+            self?.findPrevious()
+        }
+        findBar.onToggleMatchCase = { [weak self] isCase in
+            guard let self else { return }
+            self.performSearch(query: self.searchQuery, caseSensitive: isCase)
+        }
+        findBar.onClose = { [weak self] in
+            self?.hideFindBar()
+        }
 
         NSLayoutConstraint.activate([
             headerHeight,
@@ -168,7 +205,12 @@ final class DocumentPane: NSObject {
             bottomBorder.bottomAnchor.constraint(equalTo: headerBar.bottomAnchor),
             bottomBorder.heightAnchor.constraint(equalToConstant: 1),
 
-            contentContainer.topAnchor.constraint(equalTo: headerBar.bottomAnchor),
+            findBarHeight,
+            findBar.topAnchor.constraint(equalTo: headerBar.bottomAnchor),
+            findBar.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            findBar.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+
+            contentContainer.topAnchor.constraint(equalTo: findBar.bottomAnchor),
             contentContainer.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
             contentContainer.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
@@ -206,6 +248,7 @@ final class DocumentPane: NSObject {
     func load(url: URL, completion: @escaping (Result<DVIDocumentLoadResult, Error>) -> Void) {
         saveCurrentPage()
         currentURL = url
+        dviSearchEngine.clearCache()
         titleLabel.stringValue = url.lastPathComponent
         showLoading(message: "Opening \(url.lastPathComponent)...")
 
@@ -222,6 +265,9 @@ final class DocumentPane: NSObject {
                         self.showNative(document: document)
                     }
                     self.updateBadge()
+                    if self.isFindBarVisible && !self.searchQuery.isEmpty {
+                        self.performSearch(query: self.searchQuery, caseSensitive: self.isCaseSensitive)
+                    }
                     completion(.success(loadResult))
                 case .failure(let error):
                     self.showError(error)
@@ -684,5 +730,168 @@ final class DocumentPane: NSObject {
             dv.scrollToPosition(pageIndex: pageIndex, progress: progress)
             updateBadge()
         }
+    }
+
+    // MARK: - Search
+
+    func showFindBar() {
+        findBar.isHidden = false
+        findBarHeightConstraint?.constant = 38
+        findBar.makeSearchFieldFirstResponder()
+        if !searchQuery.isEmpty {
+            performSearch(query: searchQuery, caseSensitive: isCaseSensitive)
+        }
+    }
+
+    func hideFindBar() {
+        findBar.isHidden = true
+        findBarHeightConstraint?.constant = 0
+        clearSearchHighlights()
+        makeFirstResponder()
+    }
+
+    func toggleFindBar() {
+        if isFindBarVisible {
+            hideFindBar()
+        } else {
+            showFindBar()
+        }
+    }
+
+    func useSelectionForFind() {
+        var queryToUse: String? = nil
+        if let pv = pdfView, let sel = pv.currentSelection?.string, !sel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryToUse = sel.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let query = queryToUse {
+            showFindBar()
+            findBar.setQuery(query)
+        } else if !isFindBarVisible {
+            showFindBar()
+        }
+    }
+
+    var totalMatches: Int {
+        if pdfView != nil {
+            return pdfMatches.count
+        } else if dviView != nil {
+            return dviMatches.count
+        }
+        return 0
+    }
+
+    func performSearch(query: String, caseSensitive: Bool) {
+        searchQuery = query
+        isCaseSensitive = caseSensitive
+
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            clearSearchHighlights()
+            currentMatchIndex = -1
+            findBar.updateMatchStatus(currentIndex: -1, totalMatches: 0, hasQuery: false)
+            return
+        }
+
+        if let pv = pdfView, let doc = pv.document {
+            var options: NSString.CompareOptions = [.literal]
+            if !caseSensitive {
+                options.insert(.caseInsensitive)
+            }
+            let selections = doc.findString(trimmed, withOptions: options)
+            pdfMatches = selections
+            dviMatches = []
+            pv.highlightedSelections = selections
+
+            if selections.isEmpty {
+                currentMatchIndex = -1
+                pv.clearSelection()
+            } else {
+                currentMatchIndex = 0
+                jumpToPDFMatch(at: 0)
+            }
+            findBar.updateMatchStatus(currentIndex: currentMatchIndex, totalMatches: selections.count, hasQuery: true)
+        } else if let dv = dviView, let doc = dv.document {
+            let matches = dviSearchEngine.search(document: doc, query: trimmed, caseSensitive: caseSensitive)
+            dviMatches = matches
+            pdfMatches = []
+            dv.searchMatches = matches
+
+            if matches.isEmpty {
+                currentMatchIndex = -1
+                dv.activeSearchMatchIndex = -1
+            } else {
+                currentMatchIndex = 0
+                jumpToDVIMatch(at: 0)
+            }
+            findBar.updateMatchStatus(currentIndex: currentMatchIndex, totalMatches: matches.count, hasQuery: true)
+        }
+    }
+
+    func findNext() {
+        let total = totalMatches
+        guard total > 0 else {
+            if !isFindBarVisible {
+                showFindBar()
+            }
+            return
+        }
+        let nextIndex = (currentMatchIndex + 1) % total
+        currentMatchIndex = nextIndex
+        jumpToMatch(at: nextIndex)
+        findBar.updateMatchStatus(currentIndex: currentMatchIndex, totalMatches: total, hasQuery: true)
+    }
+
+    func findPrevious() {
+        let total = totalMatches
+        guard total > 0 else {
+            if !isFindBarVisible {
+                showFindBar()
+            }
+            return
+        }
+        let prevIndex = (currentMatchIndex - 1 + total) % total
+        currentMatchIndex = prevIndex
+        jumpToMatch(at: prevIndex)
+        findBar.updateMatchStatus(currentIndex: currentMatchIndex, totalMatches: total, hasQuery: true)
+    }
+
+    func jumpToMatch(at index: Int) {
+        if pdfView != nil {
+            jumpToPDFMatch(at: index)
+        } else if dviView != nil {
+            jumpToDVIMatch(at: index)
+        }
+    }
+
+    private func jumpToPDFMatch(at index: Int) {
+        guard let pv = pdfView, index >= 0, index < pdfMatches.count else { return }
+        let sel = pdfMatches[index]
+        pv.setCurrentSelection(sel, animate: true)
+        pv.go(to: sel)
+        pv.scrollSelectionToVisible(nil)
+        updateBadge()
+        onPageChange?(self)
+    }
+
+    private func jumpToDVIMatch(at index: Int) {
+        guard let dv = dviView, index >= 0, index < dviMatches.count else { return }
+        dv.activeSearchMatchIndex = index
+        let match = dviMatches[index]
+        dv.scrollToSearchMatch(match)
+        updateBadge()
+        onPageChange?(self)
+    }
+
+    func clearSearchHighlights() {
+        if let pv = pdfView {
+            pv.highlightedSelections = nil
+            pv.clearSelection()
+        }
+        if let dv = dviView {
+            dv.searchMatches = []
+            dv.activeSearchMatchIndex = -1
+        }
+        pdfMatches = []
+        dviMatches = []
     }
 }

@@ -636,6 +636,36 @@ final class DocumentWindowController: NSWindowController {
         updateStatusForCurrentDocument()
     }
 
+    // MARK: - Search
+
+    @objc func performFind(_ sender: Any?) {
+        focusedPane.showFindBar()
+    }
+
+    @objc func findNext(_ sender: Any?) {
+        focusedPane.findNext()
+    }
+
+    @objc func findPrevious(_ sender: Any?) {
+        focusedPane.findPrevious()
+    }
+
+    @objc func useSelectionForFind(_ sender: Any?) {
+        focusedPane.useSelectionForFind()
+    }
+
+    @objc func hideFindBar(_ sender: Any?) {
+        focusedPane.hideFindBar()
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        if focusedPane.isFindBarVisible {
+            focusedPane.hideFindBar()
+            return
+        }
+        super.cancelOperation(sender)
+    }
+
     // MARK: - Status & Title
 
     private func updateStatusForCurrentDocument() {
@@ -718,17 +748,23 @@ extension DocumentWindowController: NSMenuItemValidation {
         if menuItem.action == #selector(resetAlignmentOffset(_:)) {
             return secondaryPane != nil
         }
+        if menuItem.action == #selector(performFind(_:)) ||
+            menuItem.action == #selector(findNext(_:)) ||
+            menuItem.action == #selector(findPrevious(_:)) ||
+            menuItem.action == #selector(useSelectionForFind(_:)) {
+            return currentURL != nil
+        }
         return true
     }
 }
 
 extension DocumentWindowController: NSToolbarDelegate {
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDocument, .openSideBySide, .syncLock, .goToPage, .pageViewMode, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
+        [.openDocument, .openSideBySide, .syncLock, .goToPage, .pageViewMode, .search, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.openDocument, .openSideBySide, .syncLock, .goToPage, .pageViewMode, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
+        [.openDocument, .openSideBySide, .syncLock, .goToPage, .pageViewMode, .search, .flexibleSpace, .zoomOut, .actualSize, .zoomToFit, .zoomIn]
     }
 
     func toolbar(
@@ -782,6 +818,12 @@ extension DocumentWindowController: NSToolbarDelegate {
             item.label = "Page View"
             item.paletteLabel = "Page View Mode"
             item.toolTip = "Switch between single page and two-page view"
+        case .search:
+            item.label = "Find"
+            item.paletteLabel = "Find"
+            item.toolTip = "Find in document (⌘F)"
+            item.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Find")
+            item.action = #selector(performFind(_:))
         case .zoomOut:
             item.label = "Zoom Out"
             item.paletteLabel = "Zoom Out"
@@ -838,6 +880,7 @@ private extension NSToolbarItem.Identifier {
     static let syncLock = NSToolbarItem.Identifier("macDVI.toolbar.syncLock")
     static let goToPage = NSToolbarItem.Identifier("macDVI.toolbar.goToPage")
     static let pageViewMode = NSToolbarItem.Identifier("macDVI.toolbar.pageViewMode")
+    static let search = NSToolbarItem.Identifier("macDVI.toolbar.search")
     static let zoomOut = NSToolbarItem.Identifier("macDVI.toolbar.zoomOut")
     static let actualSize = NSToolbarItem.Identifier("macDVI.toolbar.actualSize")
     static let zoomToFit = NSToolbarItem.Identifier("macDVI.toolbar.zoomToFit")
