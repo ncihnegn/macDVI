@@ -389,6 +389,35 @@ final class DocumentPane: NSObject {
         }
 
         pv.translatesAutoresizingMaskIntoConstraints = false
+        pv.onScrollPageDown = { [weak self, weak pv] in
+            guard let self, let pv else { return false }
+            if self.autoScaleMode == .height || self.autoScaleMode == .width {
+                if pv.canGoToNextPage {
+                    pv.goToNextPage(nil)
+                    if let cur = pv.currentPage {
+                        self.positionPDFViewAtTop(pv, page: cur)
+                    }
+                }
+                self.updateBadge()
+                return true
+            }
+            return false
+        }
+
+        pv.onScrollPageUp = { [weak self, weak pv] in
+            guard let self, let pv else { return false }
+            if self.autoScaleMode == .height || self.autoScaleMode == .width {
+                if pv.canGoToPreviousPage {
+                    pv.goToPreviousPage(nil)
+                    if let cur = pv.currentPage {
+                        self.positionPDFViewAtTop(pv, page: cur)
+                    }
+                }
+                self.updateBadge()
+                return true
+            }
+            return false
+        }
         if autoScaleMode == .width {
             applyPDFZoomToFitWidth(pv)
         } else if autoScaleMode == .height {
@@ -735,6 +764,21 @@ final class DocumentPane: NSObject {
     }
 
     func pageDown(_ sender: Any?) {
+        if autoScaleMode == .height || autoScaleMode == .width {
+            if let pv = pdfView {
+                if pv.canGoToNextPage {
+                    pv.goToNextPage(sender)
+                    if let cur = pv.currentPage {
+                        positionPDFViewAtTop(pv, page: cur)
+                    }
+                }
+            }
+            if let dv = dviView {
+                dv.scrollPageDown()
+            }
+            updateBadge()
+            return
+        }
         if let pv = pdfView {
             pv.scrollPageDown(sender)
         }
@@ -745,6 +789,21 @@ final class DocumentPane: NSObject {
     }
 
     func pageUp(_ sender: Any?) {
+        if autoScaleMode == .height || autoScaleMode == .width {
+            if let pv = pdfView {
+                if pv.canGoToPreviousPage {
+                    pv.goToPreviousPage(sender)
+                    if let cur = pv.currentPage {
+                        positionPDFViewAtTop(pv, page: cur)
+                    }
+                }
+            }
+            if let dv = dviView {
+                dv.scrollPageUp()
+            }
+            updateBadge()
+            return
+        }
         if let pv = pdfView {
             pv.scrollPageUp(sender)
         }
@@ -1196,8 +1255,37 @@ final class DocumentPane: NSObject {
 
 final class MacDVIPDFView: PDFView {
     var onCommandClick: ((CGPoint, PDFPage) -> Void)?
+    var onScrollPageDown: (() -> Bool)?
+    var onScrollPageUp: (() -> Bool)?
     private var highlightOverlayView: NSView?
     private var highlightTimer: Timer?
+
+    override func scrollPageDown(_ sender: Any?) {
+        if let onScrollPageDown, onScrollPageDown() {
+            return
+        }
+        super.scrollPageDown(sender)
+    }
+
+    override func scrollPageUp(_ sender: Any?) {
+        if let onScrollPageUp, onScrollPageUp() {
+            return
+        }
+        super.scrollPageUp(sender)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.option) {
+            if event.charactersIgnoringModifiers == String(utf16CodeUnits: [unichar(NSDownArrowFunctionKey)], count: 1) {
+                scrollPageDown(nil)
+                return
+            } else if event.charactersIgnoringModifiers == String(utf16CodeUnits: [unichar(NSUpArrowFunctionKey)], count: 1) {
+                scrollPageUp(nil)
+                return
+            }
+        }
+        super.keyDown(with: event)
+    }
 
     override func mouseDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command) {

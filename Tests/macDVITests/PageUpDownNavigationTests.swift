@@ -126,5 +126,71 @@ final class PageUpDownNavigationTests: XCTestCase {
             dviView.scrollPageUp()
             XCTAssertEqual(dviView.currentPageIndex, initialPage)
         }
+
+        // Test Fit Width delegating page down / up to next / previous page
+        dviView.autoScaleMode = .width
+        dviView.scrollPageDown()
+        if (dviView.document?.pages.count ?? 0) > 1 {
+            XCTAssertEqual(dviView.currentPageIndex, initialPage + 1)
+            dviView.scrollPageUp()
+            XCTAssertEqual(dviView.currentPageIndex, initialPage)
+        }
+    }
+
+    func testPDFMultiPageFitWidthAndHeightPageDownUp() throws {
+        // Create a temporary 3-page PDF
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
+        let pdfData = NSMutableData()
+        guard let consumer = CGDataConsumer(data: pdfData as CFMutableData) else {
+            XCTFail("Failed to create data consumer")
+            return
+        }
+        var mediaBox = CGRect(x: 0, y: 0, width: 612, height: 792)
+        guard let ctx = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else {
+            XCTFail("Failed to create CGContext")
+            return
+        }
+
+        for i in 1...3 {
+            ctx.beginPage(mediaBox: &mediaBox)
+            let str = "Page \(i)" as NSString
+            str.draw(at: CGPoint(x: 100, y: 700), withAttributes: [.font: NSFont.systemFont(ofSize: 36)])
+            ctx.endPage()
+        }
+        ctx.closePDF()
+
+        try (pdfData as Data).write(to: tempURL)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let pane = DocumentPane()
+        let exp = expectation(description: "load 3-page PDF")
+        pane.load(url: tempURL) { _ in
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 5.0)
+
+        guard let pv = pane.pdfView, let doc = pv.document else {
+            XCTFail("PDFView and document should be loaded")
+            return
+        }
+
+        // Fit Height test
+        pane.fitHeight()
+        XCTAssertEqual(doc.index(for: pv.currentPage!), 0)
+        pane.pageDown(nil)
+        XCTAssertEqual(doc.index(for: pv.currentPage!), 1)
+        pane.pageDown(nil)
+        XCTAssertEqual(doc.index(for: pv.currentPage!), 2)
+        pane.pageUp(nil)
+        XCTAssertEqual(doc.index(for: pv.currentPage!), 1)
+
+        // Fit Width test
+        pane.fitWidth()
+        pane.pageDown(nil)
+        XCTAssertEqual(doc.index(for: pv.currentPage!), 2)
+        pane.pageUp(nil)
+        XCTAssertEqual(doc.index(for: pv.currentPage!), 1)
+        pane.pageUp(nil)
+        XCTAssertEqual(doc.index(for: pv.currentPage!), 0)
     }
 }

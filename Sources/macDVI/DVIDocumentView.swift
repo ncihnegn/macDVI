@@ -1109,7 +1109,7 @@ final class DVIDocumentView: NSView {
     }
 
     func scrollPageDown() {
-        if autoScaleMode == .height {
+        if autoScaleMode == .height || autoScaleMode == .width {
             goToNextPage()
             return
         }
@@ -1124,7 +1124,7 @@ final class DVIDocumentView: NSView {
     }
 
     func scrollPageUp() {
-        if autoScaleMode == .height {
+        if autoScaleMode == .height || autoScaleMode == .width {
             goToPreviousPage()
             return
         }
