@@ -1041,7 +1041,7 @@ final class DVIDocumentView: NSView {
             if event.modifierFlags.contains(.command) {
                 scrollToBottom()
             } else if event.modifierFlags.contains(.option) {
-                goToNextPage()
+                scrollPageDown()
             } else {
                 scrollLineDown()
             }
@@ -1049,7 +1049,7 @@ final class DVIDocumentView: NSView {
             if event.modifierFlags.contains(.command) {
                 scrollToTop()
             } else if event.modifierFlags.contains(.option) {
-                goToPreviousPage()
+                scrollPageUp()
             } else {
                 scrollLineUp()
             }

@@ -465,33 +465,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pageDownItem = NSMenuItem(
             title: "Page Down",
             action: #selector(pageDown(_:)),
-            keyEquivalent: String(utf16CodeUnits: [unichar(NSPageDownFunctionKey)], count: 1)
+            keyEquivalent: String(utf16CodeUnits: [unichar(NSDownArrowFunctionKey)], count: 1)
         )
-        pageDownItem.keyEquivalentModifierMask = []
+        pageDownItem.keyEquivalentModifierMask = [.option]
         pageDownItem.target = self
 
         let pageUpItem = NSMenuItem(
             title: "Page Up",
             action: #selector(pageUp(_:)),
-            keyEquivalent: String(utf16CodeUnits: [unichar(NSPageUpFunctionKey)], count: 1)
+            keyEquivalent: String(utf16CodeUnits: [unichar(NSUpArrowFunctionKey)], count: 1)
         )
-        pageUpItem.keyEquivalentModifierMask = []
+        pageUpItem.keyEquivalentModifierMask = [.option]
         pageUpItem.target = self
 
         let firstPageItem = NSMenuItem(
             title: "First Page",
             action: #selector(firstPage(_:)),
-            keyEquivalent: String(utf16CodeUnits: [unichar(NSHomeFunctionKey)], count: 1)
+            keyEquivalent: String(utf16CodeUnits: [unichar(NSUpArrowFunctionKey)], count: 1)
         )
-        firstPageItem.keyEquivalentModifierMask = []
+        firstPageItem.keyEquivalentModifierMask = [.command]
         firstPageItem.target = self
 
         let lastPageItem = NSMenuItem(
             title: "Last Page",
             action: #selector(lastPage(_:)),
-            keyEquivalent: String(utf16CodeUnits: [unichar(NSEndFunctionKey)], count: 1)
+            keyEquivalent: String(utf16CodeUnits: [unichar(NSDownArrowFunctionKey)], count: 1)
         )
-        lastPageItem.keyEquivalentModifierMask = []
+        lastPageItem.keyEquivalentModifierMask = [.command]
         lastPageItem.target = self
 
         let goToPageItem = NSMenuItem(title: "Go to Page…", action: #selector(goToPage(_:)), keyEquivalent: "g")

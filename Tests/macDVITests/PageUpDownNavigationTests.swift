@@ -21,8 +21,8 @@ final class PageUpDownNavigationTests: XCTestCase {
             XCTFail("Go menu should contain 'Page Down'")
             return
         }
-        XCTAssertEqual(pageDownItem.keyEquivalent, String(UnicodeScalar(NSPageDownFunctionKey)!))
-        XCTAssertEqual(pageDownItem.keyEquivalentModifierMask, [], "Page Down should have no modifier masks")
+        XCTAssertEqual(pageDownItem.keyEquivalent, String(UnicodeScalar(NSDownArrowFunctionKey)!))
+        XCTAssertEqual(pageDownItem.keyEquivalentModifierMask, [.option], "Page Down should have Option modifier mask")
         XCTAssertEqual(pageDownItem.action, #selector(DocumentWindowController.pageDown(_:)))
 
         // Verify Page Up
@@ -30,8 +30,8 @@ final class PageUpDownNavigationTests: XCTestCase {
             XCTFail("Go menu should contain 'Page Up'")
             return
         }
-        XCTAssertEqual(pageUpItem.keyEquivalent, String(UnicodeScalar(NSPageUpFunctionKey)!))
-        XCTAssertEqual(pageUpItem.keyEquivalentModifierMask, [], "Page Up should have no modifier masks")
+        XCTAssertEqual(pageUpItem.keyEquivalent, String(UnicodeScalar(NSUpArrowFunctionKey)!))
+        XCTAssertEqual(pageUpItem.keyEquivalentModifierMask, [.option], "Page Up should have Option modifier mask")
         XCTAssertEqual(pageUpItem.action, #selector(DocumentWindowController.pageUp(_:)))
 
         // Verify First Page
@@ -39,8 +39,8 @@ final class PageUpDownNavigationTests: XCTestCase {
             XCTFail("Go menu should contain 'First Page'")
             return
         }
-        XCTAssertEqual(firstPageItem.keyEquivalent, String(UnicodeScalar(NSHomeFunctionKey)!))
-        XCTAssertEqual(firstPageItem.keyEquivalentModifierMask, [], "First Page should have no modifier masks")
+        XCTAssertEqual(firstPageItem.keyEquivalent, String(UnicodeScalar(NSUpArrowFunctionKey)!))
+        XCTAssertEqual(firstPageItem.keyEquivalentModifierMask, [.command], "First Page should have Command modifier mask")
         XCTAssertEqual(firstPageItem.action, #selector(DocumentWindowController.firstPage(_:)))
 
         // Verify Last Page
@@ -48,8 +48,8 @@ final class PageUpDownNavigationTests: XCTestCase {
             XCTFail("Go menu should contain 'Last Page'")
             return
         }
-        XCTAssertEqual(lastPageItem.keyEquivalent, String(UnicodeScalar(NSEndFunctionKey)!))
-        XCTAssertEqual(lastPageItem.keyEquivalentModifierMask, [], "Last Page should have no modifier masks")
+        XCTAssertEqual(lastPageItem.keyEquivalent, String(UnicodeScalar(NSDownArrowFunctionKey)!))
+        XCTAssertEqual(lastPageItem.keyEquivalentModifierMask, [.command], "Last Page should have Command modifier mask")
         XCTAssertEqual(lastPageItem.action, #selector(DocumentWindowController.lastPage(_:)))
 
         for window in app.windows {
