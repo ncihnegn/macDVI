@@ -583,6 +583,22 @@ final class DocumentWindowController: NSWindowController {
         updateStatusForCurrentDocument()
     }
 
+    @objc override func scrollPageDown(_ sender: Any?) {
+        pageDown(sender)
+    }
+
+    @objc override func scrollPageUp(_ sender: Any?) {
+        pageUp(sender)
+    }
+
+    @objc override func scrollToBeginningOfDocument(_ sender: Any?) {
+        firstPage(sender)
+    }
+
+    @objc override func scrollToEndOfDocument(_ sender: Any?) {
+        lastPage(sender)
+    }
+
     var canGoNextPage: Bool {
         focusedPane.canGoNextPage
     }

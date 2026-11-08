@@ -736,7 +736,7 @@ final class DocumentPane: NSObject {
 
     func pageDown(_ sender: Any?) {
         if let pv = pdfView {
-            pv.pageDown(sender)
+            pv.scrollPageDown(sender)
         }
         if let dv = dviView {
             dv.scrollPageDown()
@@ -746,7 +746,7 @@ final class DocumentPane: NSObject {
 
     func pageUp(_ sender: Any?) {
         if let pv = pdfView {
-            pv.pageUp(sender)
+            pv.scrollPageUp(sender)
         }
         if let dv = dviView {
             dv.scrollPageUp()

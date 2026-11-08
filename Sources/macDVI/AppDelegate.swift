@@ -467,6 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(pageDown(_:)),
             keyEquivalent: String(utf16CodeUnits: [unichar(NSPageDownFunctionKey)], count: 1)
         )
+        pageDownItem.keyEquivalentModifierMask = []
         pageDownItem.target = self
 
         let pageUpItem = NSMenuItem(
@@ -474,6 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(pageUp(_:)),
             keyEquivalent: String(utf16CodeUnits: [unichar(NSPageUpFunctionKey)], count: 1)
         )
+        pageUpItem.keyEquivalentModifierMask = []
         pageUpItem.target = self
 
         let firstPageItem = NSMenuItem(
@@ -481,6 +483,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(firstPage(_:)),
             keyEquivalent: String(utf16CodeUnits: [unichar(NSHomeFunctionKey)], count: 1)
         )
+        firstPageItem.keyEquivalentModifierMask = []
         firstPageItem.target = self
 
         let lastPageItem = NSMenuItem(
@@ -488,6 +491,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(lastPage(_:)),
             keyEquivalent: String(utf16CodeUnits: [unichar(NSEndFunctionKey)], count: 1)
         )
+        lastPageItem.keyEquivalentModifierMask = []
         lastPageItem.target = self
 
         let goToPageItem = NSMenuItem(title: "Go to Page…", action: #selector(goToPage(_:)), keyEquivalent: "g")

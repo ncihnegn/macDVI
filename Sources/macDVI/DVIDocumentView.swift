@@ -1038,13 +1038,17 @@ final class DVIDocumentView: NSView {
         case String(utf16CodeUnits: [unichar(NSPageUpFunctionKey)], count: 1):
             scrollPageUp()
         case String(utf16CodeUnits: [unichar(NSDownArrowFunctionKey)], count: 1):
-            if event.modifierFlags.contains(.option) || event.modifierFlags.contains(.command) {
+            if event.modifierFlags.contains(.command) {
+                scrollToBottom()
+            } else if event.modifierFlags.contains(.option) {
                 goToNextPage()
             } else {
                 scrollLineDown()
             }
         case String(utf16CodeUnits: [unichar(NSUpArrowFunctionKey)], count: 1):
-            if event.modifierFlags.contains(.option) || event.modifierFlags.contains(.command) {
+            if event.modifierFlags.contains(.command) {
+                scrollToTop()
+            } else if event.modifierFlags.contains(.option) {
                 goToPreviousPage()
             } else {
                 scrollLineUp()
@@ -1096,7 +1100,19 @@ final class DVIDocumentView: NSView {
         scrollToBottom()
     }
 
+    @objc override func moveToBeginningOfDocument(_ sender: Any?) {
+        scrollToTop()
+    }
+
+    @objc override func moveToEndOfDocument(_ sender: Any?) {
+        scrollToBottom()
+    }
+
     func scrollPageDown() {
+        if autoScaleMode == .height {
+            goToNextPage()
+            return
+        }
         guard let clipView = enclosingScrollView?.contentView else { return }
         let currentOrigin = clipView.bounds.origin
         let viewportHeight = clipView.bounds.height
@@ -1108,6 +1124,10 @@ final class DVIDocumentView: NSView {
     }
 
     func scrollPageUp() {
+        if autoScaleMode == .height {
+            goToPreviousPage()
+            return
+        }
         guard let clipView = enclosingScrollView?.contentView else { return }
         let currentOrigin = clipView.bounds.origin
         let viewportHeight = clipView.bounds.height
